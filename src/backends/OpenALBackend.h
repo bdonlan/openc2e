@@ -26,6 +26,8 @@
 #include <alc.h>
 #include <string>
 #include <map>
+#include <list>
+#include <vector>
 
 class OpenALBuffer;
 
@@ -62,6 +64,21 @@ namespace boost {
 	}
 };
 
+typedef boost::shared_ptr<class OpenALStreamBuf> OpenALStreamBufP;
+class OpenALStreamBuf {
+	ALuint bufferID, format;
+	int freq, bitDepth, approx_ms;
+	bool stereo;
+	OpenALStreamBuf(int freq, int bitDepth, bool stereo);
+
+	int approxLen() const { return approx_ms; }
+	friend class OpenALSource;
+public:
+	~OpenALStreamBuf();
+
+	void writeAudioData(const void *data, size_t len);
+};
+
 class OpenALSource : public SkeletonAudioSource {
 protected:
 	boost::shared_ptr<class OpenALBackend> backend;
@@ -69,14 +86,27 @@ protected:
 	friend class OpenALBackend;
 
 	OpenALClip clip;
+	AudioStream stream;
 	ALuint source;
 
+	bool poll();
+	bool bufferdata();
+
+	std::list<OpenALStreamBufP> streambuffers;
+	std::vector<OpenALStreamBufP> unusedbuffers;
+	int buf_est_ms;
+	bool drain;
+	void realSetPos(float x, float y, float plane);
 public:
 	~OpenALSource() { stop(); alDeleteSources(1, &source); }
 
 	virtual AudioClip getClip() const;
 	virtual void setClip(const AudioClip &); /* Valid only in STOP state */
 	virtual SourceState getState() const;
+
+	AudioStream getStream() const;
+	void setStream(const AudioStream &);
+
 	virtual void play(); /* requires that getClip() not be a null ref */
 	virtual void stop();
 	virtual void pause();
@@ -97,9 +127,13 @@ protected:
 	ALfloat ListenerPos[3];
 	bool muted;
 
-	std::map<OpenALSource *, boost::shared_ptr<AudioSource> > followingSrcs;
+	// these are weak to avoid a reference loop
+	std::map<OpenALSource *, boost::weak_ptr<AudioSource> > followingSrcs;
+	std::map<OpenALSource *, boost::weak_ptr<AudioSource> > pollingSrcs;
 	friend class OpenALSource;
 
+	void startPolling(OpenALSource *);
+	void stopPolling(OpenALSource *);
 public:
 	boost::shared_ptr<OpenALBackend> shared_from_this() {
 		return boost::static_pointer_cast<OpenALBackend, AudioBackend>(this->AudioBackend::shared_from_this());
@@ -121,6 +155,7 @@ public:
 
 	void begin();
 	void commit();
+	void poll();
 };
 
 #endif
