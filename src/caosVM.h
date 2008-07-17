@@ -878,6 +878,7 @@ public:
 	void c_VOIS();
 	void c_MIDI();
 	void c_PLDS();
+	void c_DBG_SINE();
 
 	// time
 	void v_PACE();
