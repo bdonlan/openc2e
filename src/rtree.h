@@ -30,7 +30,7 @@
 #include <list>
 #include <deque>
 #include <boost/lambda/lambda.hpp>
-#include "slaballoc.h"
+#include "reusepool.h"
 #include "openc2e.h"
 
 // REGION_MAX should be odd, or adjust REGION_MIN manually
@@ -401,7 +401,7 @@ struct RBranch : public RNode<T> {
 		assert(child_count == REGION_MAX);
 		
 		unsigned int split = child_count / 2;
-		RBranch<T> *newbranch = new(this->tree->branches) RBranch<T>(children[split]->r, this->tree);
+		RBranch<T> *newbranch = new(this->tree->branches.malloc()) RBranch<T>(children[split]->r, this->tree);
 
 		newbranch->is_leaf = this->is_leaf;
 
@@ -432,7 +432,7 @@ struct RBranch : public RNode<T> {
 		newbranch->minimize();
 		
 		if (!this->parent) { // Need to make a new root!
-			root = new(this->tree->branches) RBranch<T>(this->r, this->tree);
+			root = new(this->tree->branches.malloc()) RBranch<T>(this->r, this->tree);
 			root->is_leaf = false;
 			root->insert(this, root);
 		}
@@ -467,7 +467,6 @@ struct RBranch : public RNode<T> {
 		return oss.str();
 	}
 
-	SLAB_CLASS(RBranch<T>)
 };
 
 template<class T>
@@ -497,18 +496,26 @@ struct RData : public RNode<T> {
 		return oss.str();
 	}
 
-	SLAB_CLASS(RData<T>)
 };
 
 template <class T>
 class RTree {
 	protected:
 		RBranch<T> *root;
-		SlabAllocator branches;
-		DestructingSlab leaves;
+		boost::pool<> branches;
+		ReusePool<RData<T> > leaves;
 	public:
 
-		void free_node(RNode<T> *n) { delete n; }
+		void free_node(RNode<T> *n) {
+			RData<T> *d = dynamic_cast<RData<T> *>(n);
+			if (d) {
+				leaves.destroy(d);
+			} else {
+				RBranch<T> *b = dynamic_cast<RBranch<T> *>(n);
+				assert(b);
+				branches.free(b);
+			}
+		}
 		
 		friend class ptr;
 		friend class RBranch<T>;
@@ -545,7 +552,7 @@ class RTree {
 							tree->free_node(br);
 						} else {
 							if (!tree->root)
-								tree->root = new(this->tree->branches) RBranch<T>(node->r, tree);
+								tree->root = new(this->tree->branches.malloc()) RBranch<T>(node->r, tree);
 							tree->root->chooseleaf(node->r)->insert(node, tree->root);
 						}
 					}
@@ -553,12 +560,12 @@ class RTree {
 		};
 		
 						
-		RTree() : root(NULL) {}
+		RTree() : root(NULL), branches(sizeof(RBranch<T>)) {}
 		
 		void insert(const Region &r, const T &val) {
-			RData<T> *node = new(leaves) RData<T>(r, this, val);
+			RData<T> *node = leaves.construct(r, this, val);
 			if (!root)
-				root = new(branches) RBranch<T>(r, this);
+				root = new(branches.malloc()) RBranch<T>(r, this);
 			root->chooseleaf(r)->insert(node, root);
 			check();
 		}
@@ -595,38 +602,6 @@ class RTree {
 				return "NULL";
 			return root->dump();
 		}
-
-		
-		template<class Archive>
-			void save(Archive & ar, const unsigned int version) const {
-				std::vector<RData<T> *> l;
-				Region za_warudo(INT_MIN, INT_MIN, INT_MAX, INT_MAX);
-				if (root)
-					root->scan(za_warudo, l);
-				size_t len = l.size();
-				assert(len == size());
-				ar & len;
-				std::for_each(l.start(), l.end(),
-						ar & (*_1)->* &RData<T>::r & (*_1)->* &RData<T>::obj);
-			}
-
-		template<class Archive>
-			void load(Archive & ar, const unsigned int version) {
-				leaves.clear();
-				branches.clear();
-				root = NULL;
-
-				size_t len;
-				ar & len;
-				
-				for (size_t i = 0; i < len; i++) {
-					Region r;
-					T obj;
-
-					ar & r & obj;
-					insert(r, obj);
-				}
-			}
 
 		void check() { if (root) root->expensive_checks(); }
 		size_t size() const { return root ? root->size() : 0; }
