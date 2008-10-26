@@ -26,9 +26,11 @@
 Camera::Camera() {
 	metaroom = 0;
 	panning = false;
+	x = 0;
+	y = 0;
 }
 
-MetaRoom * const Camera::getMetaRoom() {
+MetaRoom * Camera::getMetaRoom() const {
 	return world.map.getMetaRoom(metaroom);
 }
 
@@ -50,13 +52,19 @@ void Camera::moveTo(int _x, int _y, panstyle pan) {
 	x = _x;
 	y = _y;
 
-	MetaRoom *m = world.map.metaRoomAt(x, y);
-	if (m)
-		metaroom = m->id;
-	
 	// TODO: panning
 	
 	checkBounds();
+}
+
+void Camera::moveToGlobal(int _x, int _y, panstyle pan) {
+	MetaRoom *m = world.map.metaRoomAt(_x, _y);
+	if (m) {
+		if (m->id != metaroom) pan = jump; // inter-metaroom panning is always jump
+		metaroom = m->id;
+	}
+
+	moveTo(_x, _y, pan);
 }
 
 void MainCamera::moveTo(int _x, int _y, panstyle pan) {
@@ -126,29 +134,29 @@ void Camera::updateTracking() {
 	// TODO: not very intelligent :) also, are int casts correct?
 	int trackx = (int)trackedagent->x + ((int)trackedagent->getWidth() / 2) - (int)(getWidth() / 2);
 	int tracky = (int)trackedagent->y + ((int)trackedagent->getHeight() / 2) - (int)(getHeight() / 2);
-	moveTo(trackx, tracky);
+	moveToGlobal(trackx, tracky);
 }
 
-unsigned int const MainCamera::getWidth() {
+unsigned int MainCamera::getWidth() const {
 	if ((!getMetaRoom()) || (backend->getMainSurface()->getWidth() < getMetaRoom()->width()))
 		return backend->getMainSurface()->getWidth();
 	else
 		return getMetaRoom()->width();
 }
 
-unsigned int const MainCamera::getHeight() {
+unsigned int MainCamera::getHeight() const {
 	if ((!getMetaRoom()) || (backend->getMainSurface()->getHeight() < getMetaRoom()->height()))
 		return backend->getMainSurface()->getHeight();
 	else
 		return getMetaRoom()->height();
 }
 
-unsigned int const PartCamera::getWidth() {
+unsigned int PartCamera::getWidth() const {
 	// TODO: update from ZOOM values
 	return part->cameraWidth();
 }
 
-unsigned int const PartCamera::getHeight() {
+unsigned int PartCamera::getHeight() const {
 	// TODO: update from ZOOM values
 	return part->cameraHeight();
 }

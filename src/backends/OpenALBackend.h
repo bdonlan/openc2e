@@ -25,6 +25,7 @@
 #include <al.h>
 #include <alc.h>
 #include <string>
+#include <map>
 
 class OpenALBuffer;
 
@@ -47,8 +48,8 @@ protected:
 
 public:
 	~OpenALBuffer() { alDeleteBuffers(1, &buffer); }
-	virtual unsigned int length_ms(); /* milliseconds */
-	virtual unsigned int length_samples();
+	virtual unsigned int length_ms() const; /* milliseconds */
+	virtual unsigned int length_samples() const;
 };
 
 typedef boost::intrusive_ptr<OpenALBuffer> OpenALClip;
@@ -73,19 +74,20 @@ protected:
 public:
 	~OpenALSource() { stop(); alDeleteSources(1, &source); }
 
-	virtual AudioClip getClip();
-	virtual void setClip(AudioClip &); /* Valid only in STOP state */
-	virtual SourceState getState();
+	virtual AudioClip getClip() const;
+	virtual void setClip(const AudioClip &); /* Valid only in STOP state */
+	virtual SourceState getState() const;
 	virtual void play(); /* requires that getClip() not be a null ref */
 	virtual void stop();
 	virtual void pause();
 	virtual void fadeOut();
 	virtual void setPos(float x, float y, float plane);
 	virtual void setVelocity(float x, float y);
-	virtual bool isLooping();
+	virtual bool isLooping() const;
 	virtual void setLooping(bool);
 	virtual void setVolume(float v);
 	virtual void setMute(bool);
+	virtual void setFollowingView(bool);
 };
 
 class OpenALBackend : public AudioBackend {
@@ -94,6 +96,12 @@ protected:
 	ALfloat ListenerVel[3];
 	ALfloat ListenerPos[3];
 	bool muted;
+
+	std::map<OpenALSource *, boost::shared_ptr<AudioSource> > followingSrcs;
+	friend class OpenALSource;
+
+	ALCdevice *device;
+	ALCcontext *context;
 
 public:
 	boost::shared_ptr<OpenALBackend> shared_from_this() {
@@ -109,7 +117,7 @@ public:
 	void updateListener();
 	void setViewpointCenter(float x, float y);
 	void setMute(bool m);
-	bool isMuted() { return muted; }
+	bool isMuted() const { return muted; }
 
 	boost::shared_ptr<AudioSource> newSource();
 	AudioClip loadClip(const std::string &filename);

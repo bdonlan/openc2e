@@ -30,6 +30,8 @@ public:
 
 	class Creature *getSelectedCreature();
 
+	void makeNewEgg();
+
 signals:
 	void ticked();
 	void creatureTicked();
@@ -42,11 +44,14 @@ private slots:
 	void updateCreaturesMenu();
 	void selectCreature();
 	void updateMenus();
+	void updateAppletStatus();
 	
 	void about();
 	
 	void showHatchery();
+	void toggleHatchery();
 	void showAgentInjector();
+	void toggleAgentInjector();
 	void showBrainViewer();
 	
 	void toggleShowMap();
@@ -61,7 +66,6 @@ private slots:
 	void newNorn();
 
 private:
-	QToolBar *maintoolbar;
 	QMenu *fileMenu, *viewMenu, *controlMenu, *debugMenu, *toolsMenu, *creaturesMenu, *helpMenu;
 	QAction *exitAct, *aboutAct, *agentInjectorAct, *brainViewerAct, *hatcheryAct;
 	QAction *showMapAct, *newNornAct, *newEggAct;
@@ -79,6 +83,34 @@ private:
 	std::string oldcreaturename;
 
 	class QTimer *ourTimer;
+
+	void constructMenus();
+
+	/*** C2 ***/
+
+	QPixmap standardicons, handicons, favtoolbaricons, appleticons;
+	QPixmap seasonicon[4], timeofdayicon[5], temperatureicon[5];
+	QPixmap healthicon[6], hearticon[4];
+
+	// statusbar
+	class QLabel *seasontext, *seasonimage, *yeartext, *timeofdayimage, *temperatureimage;
+	class QLabel *healthimage, *heartimage, *iconimage;
+
+	// Standard
+	QAction *toolbarnextaction, *toolbareyeviewaction, *toolbartrackaction, *toolbarhaloaction;
+	QAction *toolbarplayaction, *toolbarpauseaction;
+	QAction *toolbarhelpaction, *toolbarwebaction;
+	class QComboBox *speechcombo, *placecombo;
+
+	// Pointer
+	QAction *toolbarinvisibleaction, *toolbarteachaction, *toolbarpushaction;
+
+	// Applets
+	QAction *toolbarhatcheryaction, *toolbaragentaction;
+
+	void loadC2Images();
+	void createC2Toolbars();
+	void setupC2Statusbar();
 };
 
 #endif

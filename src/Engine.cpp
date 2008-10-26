@@ -28,6 +28,8 @@
 #include "backends/NullBackend.h"
 #include "backends/NullAudioBackend.h"
 #include "SFCFile.h"
+#include "peFile.h"
+#include "Camera.h"
 
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -68,12 +70,14 @@ Engine::Engine() {
 	cmdline_norun = false;
 
 	palette = 0;
+	exefile = 0;
 
 	addPossibleBackend("null", shared_ptr<Backend>(new NullBackend()));
 	addPossibleAudioBackend("null", shared_ptr<AudioBackend>(new NullAudioBackend()));
 }
 
 Engine::~Engine() {
+	if (palette) delete[] palette;
 }
 
 void Engine::addPossibleBackend(std::string s, boost::shared_ptr<Backend> b) {
@@ -93,11 +97,13 @@ void Engine::addPossibleAudioBackend(std::string s, boost::shared_ptr<AudioBacke
 void Engine::setBackend(shared_ptr<Backend> b) {
 	backend = b;
 	lasttimestamp = backend->ticks();
+}
 
+void Engine::loadGameData() {
 	// load palette for C1
 	if (world.gametype == "c1") {
 		// TODO: case-sensitivity for the lose
-		fs::path palpath(world.data_directories[0] / "/Palettes/palette.dta");
+		fs::path palpath(world.findFile("Palettes/palette.dta"));
 		if (fs::exists(palpath) && !fs::is_directory(palpath)) {
 			palette = new unsigned char[768];
 			
@@ -112,6 +118,37 @@ void Engine::setBackend(shared_ptr<Backend> b) {
 			backend->setPalette((uint8 *)palette);
 		} else
 			throw creaturesException("Couldn't find C1 palette data!");
+	}
+
+	// load word list for C2
+	if (world.gametype == "c2") {
+		fs::path exepath(world.findFile("Creatures2.exe"));
+		if (fs::exists(exepath) && !fs::is_directory(exepath)) {
+			try {
+				exefile = new peFile(exepath);
+			} catch (creaturesException &e) {
+				std::cout << "Warning: Couldn't load word list (" << e.what() << ")!" << std::endl;
+			}
+		} else std::cout << "Warning: Couldn't load word list (couldn't find Creatures2.exe)!" << std::endl;
+
+		if (exefile) {
+			// TODO: support multiple languages
+			resourceInfo *r = exefile->getResource(PE_RESOURCETYPE_STRING, HORRID_LANG_ENGLISH, 14);
+			if (r) {
+				std::vector<std::string> strings = r->parseStrings();
+				if (strings.size() > 5) {
+					std::string wordlistdata = strings[5];
+
+					std::string s;
+					for (unsigned int i = 0; i < wordlistdata.size(); i++) {
+						if (wordlistdata[i] == '|') {
+							wordlist.push_back(s);
+							s.clear();
+						} else s += wordlistdata[i];
+					}
+				} else std::cout << "Warning: Couldn't load word list (string table too small)!" << std::endl;
+			} else std::cout << "Warning: Couldn't load word list (couldn't find resource)!" << std::endl;
+		}
 	}
 }
 
@@ -266,10 +303,10 @@ void Engine::handleKeyboardScrolling() {
 
 	// do the actual movement
 	if (velx || vely) {
-		int adjustx = world.camera.getX(), adjusty = world.camera.getY();
+		int adjustx = world.camera->getX(), adjusty = world.camera->getY();
 		int adjustbyx = (int)velx, adjustbyy = (int) vely;
 			
-		world.camera.moveTo(adjustx + adjustbyx, adjusty + adjustbyy, jump);
+		world.camera->moveTo(adjustx + adjustbyx, adjusty + adjustbyy, jump);
 	}
 }
 
@@ -461,20 +498,20 @@ void Engine::handleSpecialKeyDown(SomeEvent &event) {
 
 				case 33: // pageup
 					// TODO: previous metaroom
-					if ((world.map.getMetaRoomCount() - 1) == world.camera.getMetaRoom()->id)
+					if ((world.map.getMetaRoomCount() - 1) == world.camera->getMetaRoom()->id)
 						break;
-					n = world.map.getMetaRoom(world.camera.getMetaRoom()->id + 1);
+					n = world.map.getMetaRoom(world.camera->getMetaRoom()->id + 1);
 					if (n)
-						world.camera.goToMetaRoom(n->id);
+						world.camera->goToMetaRoom(n->id);
 					break;
 
 				case 34: // pagedown
 					// TODO: next metaroom
-					if (world.camera.getMetaRoom()->id == 0)
+					if (world.camera->getMetaRoom()->id == 0)
 						break;
-					n = world.map.getMetaRoom(world.camera.getMetaRoom()->id - 1);
+					n = world.map.getMetaRoom(world.camera->getMetaRoom()->id - 1);
 					if (n)
-						world.camera.goToMetaRoom(n->id);
+						world.camera->goToMetaRoom(n->id);
 					break;
 
 				default: break; // to shut up warnings
@@ -694,7 +731,7 @@ bool Engine::initialSetup() {
 	}
 	possible_audiobackends.clear();
 
-	world.camera.setBackend(backend); // TODO: hrr
+	world.camera->setBackend(backend); // TODO: hrr
 	
 	int listenport = backend->networkInit();
 	if (listenport != -1) {
@@ -717,6 +754,8 @@ bool Engine::initialSetup() {
 		caosVar contents; contents.setInt(1);
 		eame_variables[name] = contents;
 	}
+
+	loadGameData();
 
 	// execute the initial scripts!
 	std::cout << "* Executing initial scripts..." << std::endl;
@@ -774,8 +813,8 @@ bool Engine::initialSetup() {
 
 void Engine::shutdown() {
 	world.shutdown();
-	backend->shutdown();
 	audio->shutdown();
+	backend->shutdown();
 	freeDelegates(); // does nothing if there are none (ie, no call to initialSetup)
 }
 

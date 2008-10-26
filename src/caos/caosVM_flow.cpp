@@ -150,10 +150,12 @@ void caosVM::c_UNTL() {
  %pragma stackdelta 0
  %status maybe
  %pragma variants c1 c2 cv c3 sm
+ %cost c1,c2 0
  
  Jumps to a subroutine defined by SUBR with label (label).
 */
 void caosVM::c_GSUB() {
+	// TODO: is cost correct?
 	// handled elsewhere
 }
 
@@ -175,10 +177,12 @@ void caosVM::c_SUBR() {
  %pragma stackdelta any
  %status maybe
  %pragma variants c1 c2 cv c3 sm
+ %cost c1,c2 0
  
  Returns from a subroutine called with GSUB.
 */
 void caosVM::c_RETN() {
+	// TODO: is cost correct?
 	if (callStack.empty())
 		throw creaturesException("RETN with an empty callstack");
 	nip = callStack.back().nip;
@@ -401,12 +405,15 @@ void caosVM::v_CAOS() {
 	VM_PARAM_INTEGER(state_trans)
 	VM_PARAM_INTEGER(inl)
 	
+	std::istringstream iss(commands);
+	caosScript s("c3", "CAOS command"); // XXX: variant
+
 	caosVM *sub = world.getVM(NULL);
 	sub->resetCore();
 	
 	if (inl) {
-		for (int i = 0; i < 100; i++)
-			sub->var[i] = var[i];
+		var.ensure(100);
+		sub->var.ensure(100);
 		sub->targ = targ;
 		sub->_it_ = _it_;
 		sub->part = part;
@@ -423,18 +430,27 @@ void caosVM::v_CAOS() {
 	sub->_p_[1] = p2;
 
 	try {
-		std::istringstream iss(commands);
-		std::ostringstream oss;
-		caosScript s("c3", "CAOS command"); // XXX: variant
 		s.parse(iss);
+		if (inl) {
+			// Inline CAOS calls are expensive, mmmkay?
+			for (int i = 0; i < 100; i++)
+				sub->var[s.installer->mapVAxx(i)] = var[currentscript->mapVAxx(i)];
+		}
+
 		s.installScripts();
+		
+		std::ostringstream oss;
 		sub->outputstream = &oss;
+		
 		sub->runEntirely(s.installer);
+		
 		result.setString(oss.str());
 		sub->outputstream = 0;
 	} catch (std::exception &e) {
 		sub->outputstream = 0; // very important that this isn't pointing onto dead stack when the VM is freed
 		
+		// TODO: 'catches' should be handled seperately and set report to the error# and string to ***
+		// but we have no idea what error# to provide right now (see errors in CAOS.catalogue)
 		if (!throws || catches) {
 			report->setString(e.what());
 			result.setString("###");

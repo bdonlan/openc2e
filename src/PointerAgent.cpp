@@ -24,6 +24,8 @@
 #include "caosVM.h"
 #include "Room.h"
 #include "MetaRoom.h"
+#include "Camera.h"
+#include <climits>
 
 // TODO: change imagecount?
 PointerAgent::PointerAgent(std::string spritefile) : SimpleAgent(2, 1, 1, INT_MAX, spritefile, 0, 0) {
@@ -31,15 +33,17 @@ PointerAgent::PointerAgent(std::string spritefile) : SimpleAgent(2, 1, 1, INT_MA
 	handle_events = true;
 	holdingWire = 0;
 	wireOriginID = 0;
-	// TODO: verify attributes on the pointer in c2e
-	attr.setInt(256); // camera shy
+
+	hotspotx = 0;
+	hotspoty = 0;
 }
 
 void PointerAgent::finishInit() {
 	Agent::finishInit();
 
 	// float relative to main camera
-	attr.setInt(attr.getInt() & 32);
+	// TODO: this seems hard-coded in DS (pointer attr is 0)
+	attr = attr & 32;
 	floatSetup();
 }
 
@@ -89,7 +93,7 @@ void PointerAgent::handleEvent(SomeEvent &event) {
 	int x = pointerX(), y = pointerY();
 		
 	if (event.type == eventmousemove) {
-		moveTo(event.x + world.camera.getX() - hotspotx, event.y + world.camera.getY() - hotspoty);
+		moveTo(event.x + world.camera->getX() - hotspotx, event.y + world.camera->getY() - hotspoty);
 		velx.setInt(event.xrel * 4);
 		vely.setInt(event.yrel * 4);
 
@@ -98,7 +102,7 @@ void PointerAgent::handleEvent(SomeEvent &event) {
 
 		// middle mouse button scrolling
 		if (event.button & buttonmiddle)
-			world.camera.moveTo(world.camera.getX() - event.xrel, world.camera.getY() - event.yrel, jump);
+			world.camera->moveTo(world.camera->getX() - event.xrel, world.camera->getY() - event.yrel, jump);
 	} else if (!handle_events) {
 		/* mouse move events are (apparently - see eg C3 agent help) still handled with handle_events disabled, but nothing else */
 		return;

@@ -41,9 +41,9 @@ protected:
 	/* we don't track state here because, well, the clips don't support
 	 * length values yet.
 	 */
-	bool looping, muted;
+	bool looping, muted, followview;
 	float x, y, z, volume;
-	SkeletonAudioSource() { looping = false; muted = false; volume = 1.0f; }
+	SkeletonAudioSource() { looping = false; muted = false; volume = 1.0f; followview = false; }
 
 public:
 	AudioClip getClip() { return clip; }
@@ -51,7 +51,7 @@ public:
 		assert(getState() == SS_STOP);
 		clip = ac;
 	}
-	SourceState getState() {
+	SourceState getState() const {
 		return SS_STOP;
 	}
 	void play() { assert(clip); }
@@ -59,14 +59,17 @@ public:
 	void pause() { }
 	void fadeOut() { }
 	void setPos(float x_, float y_, float z_) { x = x_; y = y_; z = z_; }
-	void getPos(float &x_, float &y_, float &z_) { x_ = x; y_ = y; z_ = z; }
+	void getPos(float &x_, float &y_, float &z_) const { x_ = x; y_ = y; z_ = z; }
 	void setVelocity(float, float) { }
-	bool isLooping() { return looping; }
+	bool isLooping() const { return looping; }
 	void setLooping(bool l) { looping = l; }
 	void setVolume(float v) { volume = v; }
-	float getVolume() { return volume; }
-	bool isMuted() { return muted; }
+	float getVolume() const { return volume; }
+	bool isMuted() const { return muted; }
 	void setMute(bool m) { muted = m; }
+	bool isFollowingView() const { return followview; }
+	void setFollowingView(bool v) { followview = v; }
+
 };
 
 #endif

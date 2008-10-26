@@ -32,6 +32,7 @@
 #include "Room.h"
 #include "MetaRoom.h"
 #include "Catalogue.h"
+#include "Camera.h"
 
 #include <boost/format.hpp>
 #include <boost/filesystem/convenience.hpp>
@@ -50,13 +51,18 @@ World::World() {
 	showrooms = false;
 	autokill = false;
 	autostop = false;
+
+	camera = new MainCamera();
 }
 
 World::~World() {
 	agents.clear();
+	delete camera;
 	for (std::vector<caosVM *>::iterator i = vmpool.begin(); i != vmpool.end(); i++)
 		delete *i;
 }
+
+#include "images/bmpImage.h"
 
 // annoyingly, if we put this in the constructor, the catalogue isn't available yet
 void World::init() {
@@ -73,10 +79,17 @@ void World::init() {
 				int hotspotx, hotspoty;
 				if (sscanf(pointerinfo[1].c_str(), "%d %d", &hotspotx, &hotspoty) == 2)
 					theHand->setHotspot(hotspotx, hotspoty);
-				// TODO: seamonkeys has 'numImages baseImage' 'blockwidth blockheight' on the end of this tag
+				if (gametype == "sm" && pointerinfo.size() >= 5) {
+					// TODO: seamonkeys has 'numImages baseImage' too
+					int blockwidth, blockheight;
+					if (sscanf(pointerinfo[4].c_str(), "%d %d", &blockwidth, &blockheight) == 2) {
+						bmpImage *bmpimg = dynamic_cast<bmpImage *>(img.get());
+						if (bmpimg) bmpimg->setBlockSize(blockwidth, blockheight);
+					}
+				}
 				theHand->finishInit();
 			} else {
-				std::cout << "There was a seemingly-useful \"Pointer Information\" catalogue tag provided, but sprite file '" << pointerinfo[2] << " ' doesn't exist!" << std::endl;
+				std::cout << "There was a seemingly-useful \"Pointer Information\" catalogue tag provided, but sprite file '" << pointerinfo[2] << "' doesn't exist!" << std::endl;
 			}
 		}
 	}
@@ -141,11 +154,13 @@ caosVM *World::getVM(Agent *a) {
 		caosVM *x = vmpool.back();
 		vmpool.pop_back();
 		x->setOwner(a);
+		x->resetScriptState();
 		return x;
 	}
 }
 
 void World::freeVM(caosVM *v) {
+	// we don't reset the script state here because caosVM might be in our call stack and we don't want to reset the VM from under itself
 	v->setOwner(0);
 	vmpool.push_back(v);
 }
@@ -191,11 +206,11 @@ void World::tick() {
 	if (quitting) {
 		// due to destruction ordering we must explicitly destroy all agents here
 		agents.clear();
-		exit(0);
+		engine.done = true;
 	}
 
 	// Notify the audio backend about our current viewpoint center.
-	engine.audio->setViewpointCenter(world.camera.getXCentre(), world.camera.getYCentre());
+	engine.audio->setViewpointCenter(camera->getXCentre(), camera->getYCentre());
 	
 	std::list<std::pair<boost::shared_ptr<AudioSource>, bool> >::iterator si = uncontrolled_sounds.begin();
 	while (si != uncontrolled_sounds.end()) {
@@ -206,13 +221,13 @@ void World::tick() {
 		} else {
 			if (si->second) {
 				// follow viewport
-				si->first->setPos(world.camera.getXCentre(), world.camera.getYCentre(), 0);
+				si->first->setPos(camera->getXCentre(), camera->getYCentre(), 0);
 			} else {
 				// mute/unmute off-screen uncontrolled audio if necessary
 				float x, y, z;
 				si->first->getPos(x, y, z);
 				if (engine.version > 2) // TODO: this is because of wrap issues, but we need a better fix
-					si->first->setMute(world.camera.getMetaRoom() != world.map.metaRoomAt(x, y));
+					si->first->setMute(camera->getMetaRoom() != world.map.metaRoomAt(x, y));
 			}
 		}
 
@@ -361,7 +376,7 @@ shared_ptr<Agent> World::lookupUNID(int unid) {
 }
 
 void World::drawWorld() {
-	drawWorld(&camera, engine.backend->getMainSurface());
+	drawWorld(camera, engine.backend->getMainSurface());
 }
 
 void World::drawWorld(Camera *cam, Surface *surface) {
@@ -416,7 +431,7 @@ void World::drawWorld(Camera *cam, Surface *surface) {
 
 	// render all the agents
 	for (std::multiset<renderable *, renderablezorder>::iterator i = renders.begin(); i != renders.end(); i++) {
-		if ((*i)->showOnRemoteCameras() || cam == &camera) {
+		if ((*i)->showOnRemoteCameras() || cam == camera) {
 			// three-pass for wraparound rooms, the third since agents often straddle the boundary
 			// TODO: same as above with background rendering
 			for (unsigned int z = 0; z < (m->wraparound() ? 3 : 1); z++) {
@@ -562,7 +577,7 @@ void World::executeBootstrap(bool switcher) {
 			// iterate through each bootstrap directory
 			for (fs::directory_iterator d(b); d != fsend; ++d) {
 				if (fs::exists(*d) && fs::is_directory(*d)) {
-					std::string s = (*d).leaf();
+					std::string s = d->path().leaf();
 					// TODO: cvillage has switcher code in 'Startup', so i included it here too
 					if (s == "000 Switcher" || s == "Startup") {
 						if (!switcher) continue;
@@ -718,7 +733,7 @@ boost::shared_ptr<AudioSource> World::playAudio(std::string filename, AgentRef a
 		assert(!controlled);
 
 		// TODO: handle non-agent sounds
-		sound->setPos(world.camera.getXCentre(), world.camera.getYCentre(), 0);
+		sound->setPos(camera->getXCentre(), camera->getYCentre(), 0);
 		uncontrolled_sounds.push_back(std::pair<boost::shared_ptr<class AudioSource>, bool>(sound, followviewport));
 	}
 	

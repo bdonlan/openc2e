@@ -31,6 +31,7 @@ class Creature;
 class Creature {
 protected:
 	CreatureAgent *parent;
+	Agent *parentagent;
 	shared_ptr<genomeFile> genome;
 	
 	// non-specific bits
@@ -91,6 +92,10 @@ public:
 	unsigned int getVariant() { return variant; }
 	unsigned short getTint(unsigned int id) { return tintinfo[id]; }
 
+	unsigned int getNoUnprocessedInstincts() { return unprocessedinstincts.size(); }
+
+	unsigned int getNoCategories() { return chosenagents.size(); }
+	AgentRef getChosenAgentForCategory(unsigned int cat) { assert(cat < chosenagents.size()); return chosenagents[cat]; }
 	AgentRef getAttentionFocus() { return attention; }
 	int getAttentionId() { return attn; }
 	int getDecisionId() { return decn; }

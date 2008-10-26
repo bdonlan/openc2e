@@ -22,6 +22,7 @@
 #include "Engine.h"
 #include "MetaRoom.h"
 #include "Room.h"
+#include "Camera.h"
 #include "exceptions.h"
 
 /*
@@ -797,7 +798,7 @@ void SFCFile::copyToWorld() {
 	}
 
 	// move the camera to the correct position
-	world.camera.moveTo(scrollx, scrolly, jump);
+	world.camera->moveTo(scrollx, scrolly, jump);
 
 	// patch agents
 	// TODO: do we really need to do this, and if so, should it be done here?
@@ -986,6 +987,7 @@ void copyEntityData(SFCEntity *entity, DullPart *p) {
 
 #include "CompoundAgent.h"
 
+#include <limits.h>
 void SFCCompoundObject::copyToWorld() {
 	sfccheck(parts.size() > 0);
 
@@ -1021,7 +1023,7 @@ void SFCCompoundObject::copyToWorld() {
 		a->thrt.setInt(threat);
 		a->range.setInt(range);
 		a->accg.setInt(accg);
-		a->grav.setInt(gravdata == 0xFFFFFFFF ? 0 : 1); // TODO
+		a->falling = (gravdata == 0xFFFFFFFF ? false : true); // TODO
 		a->velx.setInt(velx);
 		a->vely.setInt(vely);
 		a->rest.setInt(rest);
@@ -1029,14 +1031,20 @@ void SFCCompoundObject::copyToWorld() {
 		a->paused = frozen; // TODO
 	}
 
+	// make sure the zorder of the first part is 0..
+	unsigned int basezorder = INT_MAX; // TODO: unsigned or signed?
+	for (unsigned int i = 0; i < parts.size(); i++) {
+		SFCEntity *e = parts[i];
+		if (!e) continue;
+		if (e->zorder < basezorder)
+			basezorder = e->zorder;
+	}
+
 	for (unsigned int i = 0; i < parts.size(); i++) {
 		SFCEntity *e = parts[i];
 		if (!e) continue;
 		DullPart *p;
-		if (i == 0)
-			p = new DullPart(a, i, e->sprite->filename, e->sprite->firstimg, e->relx, e->rely, e->zorder);
-		else
-			p = new DullPart(a, i, e->sprite->filename, e->sprite->firstimg, e->relx, e->rely, e->zorder - parts[0]->zorder);
+		p = new DullPart(a, i, e->sprite->filename, e->sprite->firstimg, e->relx, e->rely, e->zorder - basezorder);
 		a->addPart(p);
 
 		copyEntityData(e, p);
@@ -1098,7 +1106,7 @@ void SFCSimpleObject::copyToWorld() {
 		a->thrt.setInt(threat);
 		a->range.setInt(range);
 		a->accg.setInt(accg);
-		a->grav.setInt(gravdata == 0xFFFFFFFF ? 0 : 1); // TODO
+		a->falling = (gravdata == 0xFFFFFFFF ? false : true); // TODO
 		a->velx.setInt(velx);
 		a->vely.setInt(vely);
 		a->rest.setInt(rest);
@@ -1154,7 +1162,6 @@ void SFCVehicle::copyToWorld() {
 
 	// set cabin rectangle and plane
 	a->setCabinRect(cabinleft, cabintop, cabinright, cabinbottom);
-	a->cabinplane = 95; // TODO: arbitarily-chosen value (see also Vehicle constructor)
 
 	// set bump, xvec and yvec
 	a->bump = bump;

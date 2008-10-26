@@ -29,6 +29,8 @@
 #include <boost/format.hpp>
 #include "AgentHelpers.h"
 #include "Room.h" // LIML/LIMT etc
+#include "Engine.h" // C2 hack in POSE
+#include <climits>
 
 using std::cerr;
 
@@ -385,9 +387,10 @@ void caosVM::c_POSE() {
 	caos_assert(p);
 
 	SpritePart *s = dynamic_cast<SpritePart *>(p);
-	if (s)
+	if (s && engine.version != 2) // C2 has special handling for invalid poses, see SpritePart::setPose
 		caos_assert(s->getFirstImg() + s->getBase() + pose < s->getSprite()->numframes());
-	
+
+	p->animation.clear();
 	p->setPose(pose);
 }
 
@@ -422,7 +425,17 @@ void caosVM::c_ATTR() {
 
  Attributes of the TARG agent.
 */
-CAOS_LVALUE_TARG_SIMPLE(ATTR, targ->attr);
+void caosVM::v_ATTR() {
+	valid_agent(targ);
+	result.setInt(targ->getAttributes());
+}
+void caosVM::s_ATTR() {
+	VM_PARAM_VALUE(newvalue)
+	caos_assert(newvalue.hasInt());
+
+	valid_agent(targ);
+	targ->setAttributes(newvalue.getInt());
+}
 
 /**
  TICK (command) tickrate (integer)
@@ -618,13 +631,14 @@ void caosVM::c_ANMS() {
 
 	std::string t;
 	for (unsigned int i = 0; i < poselist.size(); i++) {
-		if (poselist[i] == ' ')
+		if (poselist[i] == ' ') {
 			if (!t.empty()) {
 				int n = atoi(t.c_str());
 				caos_assert(n >= 0 && n < 256);
 				animation.push_back(n);
+				t.clear();
 			}
-		else
+		} else
 			t = t + poselist[i];
 	}
 
@@ -852,6 +866,7 @@ void caosVM::c_MESG_WRIT() {
  MESG WRT+ (command) agent (agent) message_id (integer) param_1 (anything) param_2 (anything) delay (integer)
  %status maybe
  %pragma variants c2 cv c3 sm
+ %cost c1,c2 0
 
  Sends a message of type message_id to the given agent, much like MESG WRIT, but with the 
  addition of parameters.  The message will be sent after waiting the number of ticks set 
@@ -984,7 +999,7 @@ class blockUntilOver : public blockCond {
 			fno = p->getFrameNo();
 			animsize = p->animation.size();
 
-			if (fno + 1 == animsize) blocking = false;
+			if (fno == animsize) blocking = false;
 			else if (animsize == 0) blocking = false;
 			else blocking = true; 
 			return blocking;
@@ -1562,7 +1577,7 @@ void caosVM::c_TINO() {
 
 /**
  DROP (command)
- %status stub
+ %status maybe
  %pragma variants c1 c2 cv c3 sm
  %cost c1,c2 0
 
@@ -1571,7 +1586,10 @@ void caosVM::c_TINO() {
 void caosVM::c_DROP() {
 	valid_agent(targ);
 
-	// TODO
+	// TODO: what exactly are we meant to do here? firing the script directly is perhaps not right, but drops must be instant
+	if (targ->carrying) // TODO: valid?
+		targ->carrying->fireScript(5, targ, caosVar(), caosVar());
+
 	// TODO: only creatures in c1 (and c2?)
 }
 
@@ -1652,7 +1670,7 @@ void caosVM::v_TCOR() {
 
 /**
  CORE (command) topy (float) bottomy (float) leftx (float) rightx (float)
- %status stub
+ %status maybe
 */
 void caosVM::c_CORE() {
 	VM_PARAM_FLOAT(rightx)
@@ -1660,7 +1678,13 @@ void caosVM::c_CORE() {
 	VM_PARAM_FLOAT(bottomy)
 	VM_PARAM_FLOAT(topy)
 
-	// TODO
+	valid_agent(targ);
+
+	targ->has_custom_core_size = true;
+	targ->custom_core_xleft = leftx;
+	targ->custom_core_xright = rightx;
+	targ->custom_core_ytop = topy;
+	targ->custom_core_ybottom = bottomy;
 }
 
 /**
@@ -1698,11 +1722,20 @@ CAOS_LVALUE_TARG_SIMPLE(SIZE, targ->size);
 
 /**
  GRAV (variable)
- %status stub
+ %status maybe
  %pragma variants c2
 */
-	// TODO: stub because this likely == falling
-CAOS_LVALUE_TARG_SIMPLE(GRAV, targ->grav);
+void caosVM::v_GRAV() {
+	valid_agent(targ);
+	result.setInt(targ->falling);
+}
+void caosVM::s_GRAV() {
+	VM_PARAM_VALUE(newvalue)
+	caos_assert(newvalue.hasInt());
+
+	valid_agent(targ);
+	targ->falling = newvalue.getInt();
+}
 
 /**
  SETV CLS2 (command) family (integer) genus (integer) species (integer)
@@ -1897,6 +1930,24 @@ void caosVM::c_SCLE() {
 	VM_PARAM_INTEGER(scaleby)
 	VM_PARAM_INTEGER(pose)
 
+	valid_agent(targ);
+
+	// TODO
+}
+
+/**
+ STRC (command) width (integer) height (integer) enable (integer)
+ %status stub
+
+ Draw the current agent (or part? don't know) with the given width/height (ie, stretch the sprite). Set enable to 1 to enable, or 0 to disable.
+*/
+void caosVM::c_STRC() {
+	VM_PARAM_INTEGER(enable)
+	VM_PARAM_INTEGER(height)
+	VM_PARAM_INTEGER(width)
+
+	valid_agent(targ);
+
 	// TODO
 }
 
@@ -1946,7 +1997,7 @@ void caosVM::v_TCAR() {
 
 /**
  EDIT (command)
- %status stub
+ %status maybe
  %pragma variants c1 c2
 
  Attach the target agent to the mouse cursor for positioning purposes.
@@ -1959,7 +2010,7 @@ void caosVM::c_EDIT() {
 
 /**
  FRZN (variable)
- %status stub
+ %status maybe
  %pragma variants c2
 */
 void caosVM::v_FRZN() {
@@ -1993,6 +2044,24 @@ void caosVM::c_BLCK() {
 	caos_assert(img);
 
 	img->setBlockSize(width, height);
+}
+
+/**
+ SHAD (command) intensity (integer) x (integer) y (integer) enable (integer)
+ %status stub
+ %pragma variants sm
+
+ Enable/disable drawing of a shadow on the target agent with the specified intensity at the given x/y offset.
+*/
+void caosVM::c_SHAD() {
+	VM_PARAM_INTEGER(enable)
+	VM_PARAM_INTEGER(y)
+	VM_PARAM_INTEGER(x)
+	VM_PARAM_INTEGER(intensity)
+
+	valid_agent(targ);
+
+	// TODO
 }
 
 /* vim: set noet: */

@@ -75,6 +75,7 @@ void caosVM::c_NEW_PART() {
 	CompoundAgent *a = dynamic_cast<CompoundAgent *>(targ.get());
 	caos_assert(a);
 
+	// TODO: fix zordering
 	CompoundPart *p = new DullPart(a, partno, a->getSpriteFile(), a->getFirstImage() + first_image, x, y, plane - a->zorder);
 	a->addPart(p);
 
@@ -107,6 +108,19 @@ void caosVM::c_PAT_DULL() {
 	CompoundPart *p = new DullPart(a, part, sprite, first_image, x, y, plane);
 	a->addPart(p);
 }
+
+/**
+ PAT: DULL (command) part (integer) sprite (string) first_image (integer) x (integer) y (integer) plane (integer) no_images (integer)
+ %status maybe
+ %pragma variants sm
+ %pragma implementation caosVM::c_PAT_DULL_sm
+*/
+void caosVM::c_PAT_DULL_sm() {
+	VM_PARAM_INTEGER(no_images)
+
+	c_PAT_DULL();
+}
+
 
 /**
  PAT: BUTT (command) part (integer) sprite (string) first_image (integer) image_count (integer) x (integer) y (integer) plane (integer) hoveranim (byte-string) messageid (integer) option (integer)
@@ -585,7 +599,7 @@ void caosVM::c_BBD_EMIT() {
 /**
  BBD: EDIT (command) allow (integer)
  %status maybe
- %pragma variants c1
+ %pragma variants c1 c2
 
  If allow is 1, switch target blackboard into editing mode, give it focus. If it
  is 0, remove focus from target blackboard.
@@ -596,6 +610,7 @@ void caosVM::c_BBD_EDIT() {
 	valid_agent(targ);
 
 	Blackboard *b = dynamic_cast<Blackboard *>(targ.get());
+	caos_assert(b);
 	BlackboardPart *p = b->getBlackboardPart();
 	caos_assert(p);
 	
@@ -609,7 +624,7 @@ void caosVM::c_BBD_EDIT() {
 
 /**
  BBD: VOCB (command) blackboardstart (integer) globalstart (integer) count (integer)
- %status stub
+ %status maybe
  %pragma variants c2
 
  Copy count words into the blackboard word list from the global word list.
@@ -619,8 +634,20 @@ void caosVM::c_BBD_VOCB() {
 	VM_PARAM_INTEGER(globalstart)
 	VM_PARAM_INTEGER(blackboardstart)
 
+	caos_assert(count >= 0);
+	caos_assert(globalstart >= 0);
+	caos_assert(blackboardstart >= 0);
+
 	valid_agent(targ);
-	// TODO
+	Blackboard *b = dynamic_cast<Blackboard *>(targ.get());
+	caos_assert(b);
+
+	if (engine.wordlist.size() == 0) return; // no word list!
+	caos_assert((unsigned int)globalstart < engine.wordlist.size());
+
+	for (unsigned int i = 0; (i < (unsigned int)count) && ((unsigned int)globalstart + i < engine.wordlist.size()); i++) {
+		b->addBlackboardString(blackboardstart + i, globalstart + i, engine.wordlist[globalstart + i]);
+	}
 }
 
 /**

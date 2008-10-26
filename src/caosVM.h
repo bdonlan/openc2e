@@ -26,6 +26,8 @@
 #include <ostream>
 #include "AgentRef.h"
 #include "caosVar.h"
+#include "alloc_count.h"
+#include "lazy_array.h"
 
 #include <boost/variant.hpp>
 #include <boost/weak_ptr.hpp>
@@ -49,6 +51,7 @@ class badParamException : public caosException {
 };
 
 class vmStackItem {
+	COUNT_ALLOC(vmStackItem)
 	protected:
 		struct visit_dump : public boost::static_visitor<std::string> {
 			std::string operator()(const caosVar &i) const {
@@ -153,7 +156,13 @@ class blockCond {
 		virtual ~blockCond() {}
 };
 
+// for lazy_array init
+struct caosVM_var_init {
+	static inline void init(caosVar &v) { v = 0; }
+};
+
 class caosVM {
+	COUNT_ALLOC(caosVM)
 public:	
 	int trace;
 
@@ -181,7 +190,7 @@ public:
 	std::ostream *outputstream;
 
 	// ...which includes variables accessible to script
-	caosVar var[100]; // might want to make this a map, for memory efficiency
+	lazy_array<caosVar, 100, caosVM_var_init> var;
 	caosVar _p_[2]; // might want to add this onto the end of above map, if done
 	AgentRef targ, owner, _it_;
 	caosVar from;
@@ -289,6 +298,7 @@ public:
 	void v_ROOM_c1();
 	void v_WRAP();
 	void s_WRAP();
+	void c_SSFC();
 	
 	// camera
 	void v_VISI();
@@ -476,6 +486,7 @@ public:
 	void v_DBG_STOK();
 	void c_DBG_TSLC();
 	void v_DBG_TSLC();
+	void v_DBG_SIZO();
 
 	// agent
 	void c_NEW_COMP();
@@ -591,6 +602,7 @@ public:
 	void s_OBJP();
 	void v_XIST();
 	void c_SCLE();
+	void c_STRC();
 	void c_IMGE();
 	void c_TNTW();
 	void c_PRNT();
@@ -599,6 +611,7 @@ public:
 	void v_FRZN();
 	void s_FRZN();
 	void c_BLCK();
+	void c_SHAD();
 	
 	// motion
 	void c_ELAS();
@@ -642,6 +655,23 @@ public:
 	void c_MCRT();
 	void v_REST();
 	void s_REST();
+	// (rotation)
+	void c_AVEL();
+	void v_AVEL();
+	void c_FVEL();
+	void v_FVEL();
+	void c_SVEL();
+	void v_SVEL();
+	void c_ADMP();
+	void v_ADMP();
+	void c_FDMP();
+	void v_FDMP();
+	void c_SDMP();
+	void v_SDMP();
+	void c_SPIN();
+	void v_SPIN();
+	void v_ANGL();
+	void c_ROTN();
 	
 	// scripts
 	void c_INST();
@@ -665,6 +695,7 @@ public:
 	void v_PART();
 	void c_NEW_PART();
 	void c_PAT_DULL();
+	void c_PAT_DULL_sm();
 	void c_PAT_BUTT();
 	void c_PAT_FIXD();
 	void c_PAT_TEXT();
@@ -759,6 +790,7 @@ public:
 	void c_NEW_CREA();
 	void c_NEW_CREA_c1();
 	void c_NEW_CREA_c2();
+	void c_NEW_CRAG();
 	void c_LTCY();
 	void c_MATE();
 	void v_DRV();
@@ -798,6 +830,14 @@ public:
 	void c_SAY();
 	void c_TRIG();
 	void v_MONK();
+	void c_MOTR();
+	void v_MOTR();
+	void c_MIND();
+	void v_MIND();
+	void c_STEP();
+	void v_SEEN();
+	void c_DOIN();
+	void v_INS();
 	// (clothes)
 	void c_BODY();
 	void v_BODY();

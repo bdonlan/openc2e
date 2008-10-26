@@ -22,6 +22,7 @@
 #include <iostream>
 #include <boost/format.hpp>
 #include <boost/thread.hpp>
+#include <boost/foreach.hpp>
 #include <boost/lambda/bind.hpp>
 #include "SDL.h"
 #include "exceptions.h"
@@ -74,8 +75,7 @@ void OpenALBackend::init() {
 	}
 
 	// It seems that relying on hardware drivers is an awful idea - always use software if it's available.
-	// TODO: we should probably store this so we can (eventually) close stuff properly
-	ALCdevice *device = alcOpenDevice("Generic Software");
+	device = alcOpenDevice("Generic Software");
 	if (!device) {
 		device = alcOpenDevice(NULL);
 		if (!device) {
@@ -83,7 +83,7 @@ void OpenALBackend::init() {
 			throw creaturesException(boost::str(boost::format("OpenAL error (%d): %s") % err % al_error_str(err)));
 		}
 	}
-	ALCcontext *context = alcCreateContext(device, NULL);
+	context = alcCreateContext(device, NULL);
 	if (!context) {
 		ALenum err = alGetError();
 		throw creaturesException(boost::str(boost::format("OpenAL error (%d): %s") % err % al_error_str(err)));
@@ -120,9 +120,22 @@ void OpenALBackend::setViewpointCenter(float x, float y) {
 	ListenerPos[0] = x * scale;
 	ListenerPos[1] = y * scale;
 	updateListener();
+	for (
+			std::map<OpenALSource *, boost::shared_ptr<AudioSource> >::iterator it = followingSrcs.begin();
+			it != followingSrcs.end();
+			it++
+		) {
+		OpenALSource *src_p = it->first;
+		assert(src_p->getState() != SS_STOP && src_p->isFollowingView());
+		src_p->setPos(x, y, plnemul < 0.01 ? 0 : (ListenerPos[2] / plnemul));
+	}
 }
 
 void OpenALBackend::shutdown() {
+	alcMakeContextCurrent(NULL);
+	alcDestroyContext(context);
+	alcCloseDevice(device);
+
 	alutExit();
 }
 
@@ -132,6 +145,16 @@ void OpenALBackend::setMute(bool m) {
 	else
 		alListenerf(AL_GAIN, 1.0f);
 	muted = m;
+}
+
+void OpenALSource::setFollowingView(bool f) {
+	if (f) {
+		backend->followingSrcs[this] = shared_from_this();
+		setPos(backend->ListenerPos[0], backend->ListenerPos[1], backend->ListenerPos[2]);
+	} else {
+		backend->followingSrcs.erase(this);
+	}
+	followview = f;
 }
 
 boost::shared_ptr<AudioSource> OpenALBackend::newSource() {
@@ -180,7 +203,7 @@ OpenALBuffer::OpenALBuffer(boost::shared_ptr<class OpenALBackend> backend, ALuin
 	buffer = handle;
 }
 
-unsigned int OpenALBuffer::length_samples() {
+unsigned int OpenALBuffer::length_samples() const {
 	ALint bits;
 	ALint channels;
 	ALint size;
@@ -190,18 +213,18 @@ unsigned int OpenALBuffer::length_samples() {
 	return size / (bits / 8 * channels);
 }
 
-unsigned int OpenALBuffer::length_ms() {
+unsigned int OpenALBuffer::length_ms() const {
 	ALint freq;
 	alGetBufferi(buffer, AL_FREQUENCY, &freq);
 	return length_samples() * 1000 / freq;
 }
 
-AudioClip OpenALSource::getClip() {
+AudioClip OpenALSource::getClip() const {
 	AudioClip clip(static_cast<AudioBuffer *>(this->clip.get()));
 	return clip;
 }
 
-void OpenALSource::setClip(AudioClip &clip_) {
+void OpenALSource::setClip(const AudioClip &clip_) {
 	OpenALBuffer *obp = dynamic_cast<OpenALBuffer *>(clip_.get());
 	assert(obp);
 	stop();
@@ -211,7 +234,7 @@ void OpenALSource::setClip(AudioClip &clip_) {
 	}
 }
 
-SourceState OpenALSource::getState() {
+SourceState OpenALSource::getState() const {
 	int state;
 	alGetSourcei(source, AL_SOURCE_STATE, &state);
 	switch (state) {
@@ -221,7 +244,7 @@ SourceState OpenALSource::getState() {
 		default:
 		{
 			std::cerr << "Unknown openal state, stopping stream: " << state << std::endl;
-			stop();
+			const_cast<OpenALSource *>(this)->stop();
 			return SS_STOP;
 		}
 	}
@@ -230,10 +253,15 @@ SourceState OpenALSource::getState() {
 void OpenALSource::play() {
 	assert(clip);
 	alSourcePlay(source);
+	setFollowingView(followview); // re-register in the backend if needed
 }
 
 void OpenALSource::stop() {
 	alSourceStop(source);
+
+	bool oldfollow = followview;
+	setFollowingView(false);	  // unregister in backend
+	followview = oldfollow;
 }
 
 void OpenALSource::pause() {
@@ -274,7 +302,7 @@ void OpenALSource::setVelocity(float x, float y) {
 	alSource3f(source, AL_VELOCITY, x * scale, y * scale, 0);
 }
 
-bool OpenALSource::isLooping() {
+bool OpenALSource::isLooping() const {
 	int l;
 	alGetSourcei(source, AL_LOOPING, &l);
 	return l == AL_TRUE;

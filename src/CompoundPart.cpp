@@ -36,7 +36,12 @@ bool partzorder::operator ()(const CompoundPart *s1, const CompoundPart *s2) con
 		} else
 			return s1->getZOrder() > s2->getZOrder();
 	}
-	return s1->getParent()->getZOrder() > s2->getParent()->getZOrder();
+
+	// TODO: we shouldn't be checking engine.bmprenderer for this, but it's a cheap/easy way to check for seamonkeys
+	if (engine.bmprenderer)
+		return (int)s1->getParent()->getZOrder() > (int)s2->getParent()->getZOrder();
+	else
+		return s1->getParent()->getZOrder() > s2->getParent()->getZOrder();
 }
 
 shared_ptr<creaturesImage> TextEntryPart::caretsprite;
@@ -63,10 +68,15 @@ bool CompoundPart::showOnRemoteCameras() {
 void SpritePart::partRender(Surface *renderer, int xoffset, int yoffset) {
 	// TODO: we need a nicer way to handle such errors
 	if (getCurrentSprite() >= getSprite()->numframes()) {
-		std::string err = boost::str(boost::format("pose to be rendered %d (firstimg %d, base %d) was past end of sprite file '%s' (%d sprites)") %
-			pose % firstimg % base % getSprite()->getName() % getSprite()->numframes());
- 		parent->unhandledException(err, false);
-		return;
+		if (engine.version == 2) {
+			// hack for invalid poses - use the last sprite in the file (as real C2 does)
+			spriteno = getSprite()->numframes() - 1;
+		} else {
+			std::string err = boost::str(boost::format("pose to be rendered %d (firstimg %d, base %d) was past end of sprite file '%s' (%d sprites)") %
+				pose % firstimg % base % getSprite()->getName() % getSprite()->numframes());
+			parent->unhandledException(err, false);
+			return;
+		}
 	}
 	assert(getCurrentSprite() < getSprite()->numframes());
 	renderer->render(getSprite(), getCurrentSprite(), xoffset + x, yoffset + y, has_alpha, alpha, draw_mirrored);
@@ -74,30 +84,26 @@ void SpritePart::partRender(Surface *renderer, int xoffset, int yoffset) {
 
 void SpritePart::setFrameNo(unsigned int f) {
 	assert(f < animation.size());
-	if (firstimg + base + animation[f] >= getSprite()->numframes()) {
-		std::string err = boost::str(boost::format("animation frame %d (firstimg %d, base %d, value %d) was past end of sprite file '%s' (%d sprites)") %
-			f % firstimg % base % (int)animation[f] % getSprite()->getName() % getSprite()->numframes());
- 		parent->unhandledException(err, false);
-		animation.clear();
-		return;
-	}
-	
 	frameno = f;
-	pose = animation[f];
-	spriteno = firstimg + base + pose;
 }
 
 void SpritePart::setPose(unsigned int p) {
 	if (firstimg + base + p >= getSprite()->numframes()) {
-		std::string err = boost::str(boost::format("new pose %d (firstimg %d, base %d) was past end of sprite file '%s' (%d sprites)") %
-			p % firstimg % base % getSprite()->getName() % getSprite()->numframes());
- 		parent->unhandledException(err, false);
-		return;
+		if (engine.version == 2) {
+			// hack for invalid poses - use the last sprite in the file (as real C2 does)
+			spriteno = getSprite()->numframes() - 1;
+		} else {
+			// TODO: mention anim frame if animation is non-empty
+			std::string err = boost::str(boost::format("new pose %d (firstimg %d, base %d) was past end of sprite file '%s' (%d sprites)") %
+				p % firstimg % base % getSprite()->getName() % getSprite()->numframes());
+			parent->unhandledException(err, false);
+			return;
+		}
+	} else {
+		spriteno = firstimg + base + p;
 	}
 
-	animation.clear();
 	pose = p;
-	spriteno = firstimg + base + pose;
 }
 
 void SpritePart::setBase(unsigned int b) {
@@ -170,17 +176,37 @@ SpritePart::SpritePart(Agent *p, unsigned int _id, std::string spritefile, unsig
 SpritePart::~SpritePart() {
 }
 
+#include "images/bmpImage.h"
+
 void SpritePart::changeSprite(std::string spritefile, unsigned int fimg) {
 	shared_ptr<creaturesImage> spr = world.gallery.getImage(spritefile);
 	caos_assert(spr);
+	base = 0; // TODO: should we preserve base?
+
+	// TODO: this is a hack for the bmprenderer, is it really a good idea?
+	if (engine.bmprenderer) {
+		bmpImage *origimg = dynamic_cast<bmpImage *>(sprite.get());
+		bmpImage *newimg = dynamic_cast<bmpImage *>(spr.get());
+		if (origimg && newimg && origimg->numframes() > 0) newimg->setBlockSize(origimg->width(0), origimg->height(0));
+	}
+
 	caos_assert(spr->numframes() > fimg);
-	// TODO: should we preserve base/pose here, instead?
-	pose = 0;
-	base = 0;
 	firstimg = fimg;
-	spriteno = fimg;
 	// TODO: should we preserve tint?
+
 	origsprite = sprite = spr;
+
+	setPose(pose); // TODO: we need to preserve pose, but shouldn't we do some sanity checking?
+}
+
+void SpritePart::changeSprite(shared_ptr<creaturesImage> spr) {
+	caos_assert(spr);
+	// TODO: should we preserve tint?
+	base = 0; // TODO: should we preserve base?
+
+	origsprite = sprite = spr;
+
+	setPose(pose); // TODO: we need to preserve pose, but shouldn't we do some sanity checking?
 }
 
 unsigned int SpritePart::getWidth() {
@@ -270,7 +296,7 @@ void TextPart::addTint(std::string tintinfo) {
 	texttintinfo t;
 	t.offset = text.size();
 
-	if (!(r == g == b == rot == swap == 128)) {
+	if (!(r == 128 && g == 128 &&  b == 128 && rot == 128 && swap == 128)) {
 		t.sprite = textsprite->mutableCopy();
 		t.sprite->tint(r, g, b, rot, swap);
 	} else t.sprite = textsprite;
@@ -563,18 +589,41 @@ void SpritePart::tick() {
 			if (framedelay == (unsigned int)framerate + 1)
 				framedelay = 0;
 		}
+	}
 		
-		if (framedelay == 0) {
-			unsigned int f = frameno + 1;
-			if (f == animation.size()) return;
-			if (animation[f] == 255) {
-				if (f == (animation.size() - 1)) f = 0;
-				else f = animation[f + 1];
+	if (framedelay == 0)
+		updateAnimation();
+}
+
+void AnimatablePart::updateAnimation() {
+	if (animation.empty()) return;
+
+	if (frameno == animation.size()) return;
+	assert(frameno < animation.size());
+
+	if (animation[frameno] == 255) {
+		if (frameno == (animation.size() - 1)) {
+			frameno = 0;
+		} else {
+			// if we're not at the end, we ought to have at least one more item
+			assert(frameno + 1 < animation.size());
+
+			frameno = animation[frameno + 1];
+
+			if (frameno >= animation.size()) {
+				// this is an internal error because it should have been validated at pose-setting time
+				std::string err = boost::str(boost::format("internal animation error: tried looping back to frame %d but that is beyond animation size %d") %
+					(int)frameno % (int)animation.size());
+				parent->unhandledException(err, false);
+				animation.clear();
+				return;
 			}
-			// TODO: check f is valid..
-			setFrameNo(f);
+
 		}
 	}
+
+	setPose(animation[frameno]);
+	frameno++;
 }
 
 CameraPart::CameraPart(Agent *p, unsigned int _id, std::string spritefile, unsigned int fimg, int _x, int _y,
@@ -591,7 +640,7 @@ void CameraPart::partRender(class Surface *renderer, int xoffset, int yoffset) {
 	// TODO: hack to stop us rendering cameras inside cameras. better way?
 	if (renderer == engine.backend->getMainSurface()) {
 		// make sure we're onscreen before bothering to do any work..
-		if (xoffset + x + viewwidth > 0 && yoffset + y + viewheight > 0 &&
+		if (xoffset + x + (int)camerawidth >= 0 && yoffset + y + (int)cameraheight >= 0 &&
 			xoffset + x < (int)renderer->getWidth() && yoffset + y < (int)renderer->getHeight()) {
 			Surface *surface = engine.backend->newSurface(viewwidth, viewheight);
 			assert(surface); // TODO: good behaviour?

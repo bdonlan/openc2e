@@ -22,7 +22,7 @@
 #include <map>
 #include <istream>
 #include <cmath>
-#include "exceptions.h"
+#include "openc2e.h"
 #include <boost/format.hpp>
 
 void mngrestart(std::istream *is);
@@ -46,8 +46,9 @@ public:
 
 class MNGFileException : public creaturesException {
 	public:
-		int error;
-		MNGFileException(const char * m, int e) throw() : creaturesException(m) { error = e; }
+		int lineno;
+		MNGFileException(const char * m) throw() : creaturesException(m) { lineno = 0; }
+		MNGFileException(const char * m, int l) throw() : creaturesException(m) { lineno = l; }
 };
 
 class MNGNamedNode : public MNGNode {
@@ -130,6 +131,7 @@ protected:
 public:
 	MNGExpressionContainer(MNGExpression *n) { subnode = n; }
 	virtual void postProcess(processState *s) { subnode->postProcess(s); }
+	virtual ~MNGExpressionContainer() { delete subnode; }
 };
 
 class MNGPanNode : public MNGExpressionContainer { // pan
@@ -410,14 +412,19 @@ public:
 
 class MNGFile {
 	private:
-		FILE * f;
-		long filesize;
-		char * map;
+		class mmapifstream *stream;
 		std::string name;
 		int numsamples, scriptoffset, scriptlength, scriptend;
 		char * script;
 		unsigned int sampleno;
-	
+
+		static int yylineno;
+		static const char *mngfile_parse_p;
+		static void yyinit(const char *buf);
+		static int mnglex();
+		friend int mnglex();
+		friend void mngerror(const char*);
+
 	public:
 		std::map<std::string, class MNGVariableDecNode *> variables; // TODO: should be private?
 		MNGFile(std::string);

@@ -82,10 +82,13 @@ int SkeletalPartCount() {
 		return 14;
 }
 
-SkeletalCreature::SkeletalCreature(unsigned char _family) : CreatureAgent(_family) {
+SkeletalCreature::SkeletalCreature(unsigned char _family) : Agent(_family, 0, 0, 0) {
 	facialexpression = 0;
 	pregnancy = 0;
 	eyesclosed = false;
+
+	// TODO: set zorder randomly :) should be somewhere between 1000-2700, at a /guess/
+	zorder = 1500;
 
 	ticks = 0;
 	gaitgene = 0;
@@ -238,8 +241,6 @@ void SkeletalCreature::skeletonInit() {
 		
 		images[i] = tintBodySprite(images[i]);
 	}
-
-	setPose(0);
 }
 
 shared_ptr<creaturesImage> SkeletalCreature::tintBodySprite(shared_ptr<creaturesImage> s) {
@@ -472,8 +473,7 @@ void SkeletalCreature::snapDownFoot() {
 	if (engine.version > 1) {
 		// TODO: hilar hack: enable gravity if we're snapping by much
 		if (newroomchosen && abs(y - (newy - (footy - y))) > 20) {
-			if (engine.version == 2) grav.setInt(1);
-			else falling = true;
+			falling = true;
 			return;
 		}
 	}
@@ -487,7 +487,7 @@ void SkeletalCreature::snapDownFoot() {
 		if (engine.version == 2 && !belowfloor && downfootroom->floorpoints.size()) {
 			// TODO: hilar hack: same as above for floorvalue
 			if (size.getInt() <= downfootroom->floorvalue.getInt()) {
-				grav.setInt(1);
+				falling = true;
 				return;
 			}
 		} else {
@@ -496,8 +496,7 @@ void SkeletalCreature::snapDownFoot() {
 			if (downfootroom->doors.find(downroom) != downfootroom->doors.end()) {
 				int permsize = (engine.version == 2 ? size.getInt() : perm);
 				if (permsize <= downfootroom->doors[downroom]->perm) {
-					if (engine.version == 2) grav.setInt(1);
-					else falling = true;
+					falling = true;
 					return;
 				}
 			}
@@ -613,9 +612,11 @@ void SkeletalCreature::setGaitGene(unsigned int gaitdrive) { // TODO: not sure i
 }
 
 void SkeletalCreature::tick() {
-	CreatureAgent::tick();
+	Agent::tick();
 
 	if (paused) return;
+	
+	CreatureAgent::tick();
 
 	eyesclosed = creature->isAsleep() || !creature->isAlive();
 
@@ -647,7 +648,7 @@ void SkeletalCreature::tick() {
 	}
 
 	// TODO: this kinda duplicates what physicsTick is doing below
-	if ((engine.version == 1 || (engine.version == 2 && grav.getInt() == 0) || (engine.version == 3 && !falling)) && !carriedby && !invehicle)
+	if ((engine.version == 1 || !falling) && !carriedby && !invehicle)
 		snapDownFoot();
 	else
 		downfootroom.reset();
@@ -656,9 +657,16 @@ void SkeletalCreature::tick() {
 void SkeletalCreature::physicsTick() {
 	// TODO: mmh
 
-	if (engine.version > 1 && ((engine.version == 3 && falling) || (engine.version == 2 && grav.getInt() == 1)) && (engine.version == 2 || validInRoomSystem())) Agent::physicsTick();
+	if (engine.version > 1) {
+		if (falling) {
+			if (engine.version == 2 || validInRoomSystem()) {
+				Agent::physicsTick();
+			}
+		}
+	}
+
 	if (!carriedby && !invehicle) {
-		if (engine.version == 1 || (engine.version == 2 && grav.getInt() == 0) || (engine.version == 3 && !falling))
+		if (engine.version == 1 || (!falling))
 			snapDownFoot();
 		else downfootroom.reset();
 	} else downfootroom.reset();	
@@ -699,17 +707,7 @@ SkeletonPart::SkeletonPart(SkeletalCreature *p) : AnimatablePart(p, 0, 0, 0, 0) 
 }
 
 void SkeletonPart::tick() {
-	if (animation.empty()) return;
-
-	unsigned int f = frameno + 1;
-	if (f == animation.size()) return;
-	if (animation[f] == 255) {
-		if (f == (animation.size() - 1)) f = 0;
-		else f = animation[f + 1];
-
-		// TODO: check f is valid..
-		setFrameNo(f);
-	}
+	updateAnimation();
 }
 
 void SkeletonPart::setPose(unsigned int p) {
@@ -719,7 +717,6 @@ void SkeletonPart::setPose(unsigned int p) {
 void SkeletonPart::setFrameNo(unsigned int p) {
 	assert(p < animation.size());
 	frameno = p;
-	setPose(animation[p]);
 }
 
 void SkeletonPart::partRender(class Surface *renderer, int xoffset, int yoffset) {
@@ -732,6 +729,7 @@ void SkeletalCreature::finishInit() {
 
 	processGenes();
 	skeletonInit();
+	setPose(0);
 }
 
 void SkeletalCreature::creatureAged() {
@@ -739,6 +737,7 @@ void SkeletalCreature::creatureAged() {
 
 	processGenes();
 	skeletonInit();
+	recalculateSkeleton();
 }
 
 std::string SkeletalCreature::getFaceSpriteName() {

@@ -23,6 +23,7 @@
 #include "World.h"
 #include "Engine.h"
 #include "SkeletalCreature.h"
+#include "CompoundCreature.h"
 #include "Creature.h"
 using std::cerr;
 
@@ -268,7 +269,7 @@ void caosVM::c_STIM_WRIT_c2() {
  STIM FROM (command) significance (integer) input (integer) intensity (integer) features (integer) chem0 (integer) amount0 (integer) chem1 (integer) amount1 (integer) chem2 (integer) amount2 (integer) chem3 (integer) amount3 (integer)
  %status stub
  %pragma implementation caosVM::c_STIM_FROM_c1
- %pragma variants c1
+ %pragma variants c1 c2
  %cost c1,c2 0
 */
 void caosVM::c_STIM_FROM_c1() {
@@ -1177,6 +1178,48 @@ void caosVM::c_NEW_CREA_c1() {
 	setTarg(a);
 }
 
+/**
+ NEW: CRAG (command) family (integer) gene_agent (agent) gene_slot (integer) sex (integer) variant (integer) sprite_file (string) image_count (integer) first_image (integer) plane (integer)
+ %status maybe
+ %pragma variants c3 sm
+*/
+void caosVM::c_NEW_CRAG() {
+	VM_PARAM_INTEGER(plane)
+	VM_PARAM_INTEGER(first_image)
+	VM_PARAM_INTEGER(image_count)
+	VM_PARAM_STRING(sprite_file)
+	VM_PARAM_INTEGER(variant)
+	VM_PARAM_INTEGER(sex)
+	VM_PARAM_INTEGER(gene_slot)
+	VM_PARAM_VALIDAGENT(gene_agent)
+	VM_PARAM_INTEGER(family)
+
+       	std::map<unsigned int, shared_ptr<class genomeFile> >::iterator i = gene_agent->slots.find(gene_slot);
+	caos_assert(i != gene_agent->slots.end());
+
+	// randomise sex if necessary
+	if (sex == 0) sex = 1 + (int) (2.0 * (rand() / (RAND_MAX + 1.0)));
+	caos_assert(sex == 1 || sex == 2); // TODO: correct?
+
+	// TODO: if variant is 0, randomise between 1 and 8
+	CompoundCreature *a = new CompoundCreature(family, plane, sprite_file, first_image, image_count);
+	try {
+		c2eCreature *c = new c2eCreature(i->second, (sex == 2), variant, a);
+		a->setCreature(c);
+	} catch (...) {
+		delete a;
+		throw;
+	}
+	
+	a->finishInit();
+
+	world.history.getMoniker(world.history.findMoniker(i->second)).moveToCreature(a);
+	i->second.reset(); // TODO: remove the slot from the gene_agent entirely
+
+	setTarg(a);
+
+}
+
 int calculateRand(int value1, int value2); // caosVM_variables.cpp
 
 /**
@@ -1276,6 +1319,7 @@ void caosVM::c_LOCI() {
 	VM_PARAM_INTEGER(type)
 
 	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
 
 	float *f = c->getLocusPointer(!type, organ, tissue, id);
 	caos_assert(f);
@@ -1296,6 +1340,7 @@ void caosVM::v_LOCI() {
 	VM_PARAM_INTEGER(type)
 
 	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
 
 	float *f = c->getLocusPointer(!type, organ, tissue, id);
 	caos_assert(f);
@@ -1321,6 +1366,7 @@ void caosVM::v_TAGE() {
 */
 void caosVM::v_ORGN() {
 	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
 	result.setInt(c->noOrgans());
 }
 
@@ -1349,6 +1395,7 @@ void caosVM::v_ORGF() {
 	VM_PARAM_INTEGER(organ)
 	
 	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
 	if (organ < 0 || (unsigned int)organ >= c->noOrgans()) {
 		result.setFloat(-1.0f);
 		return;
@@ -1384,6 +1431,7 @@ void caosVM::v_ORGI() {
 	VM_PARAM_INTEGER(organ)
 	
 	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
 	if (organ < 0 || (unsigned int)organ >= c->noOrgans()) {
 		result.setFloat(-1.0f);
 		return;
@@ -1644,7 +1692,7 @@ void caosVM::c_INJR() {
 /**
  SAY$ (command) string (string)
  %status stub
- %pragma variants c1
+ %pragma variants c1 c2
 */
 void caosVM::c_SAY() {
 	VM_PARAM_STRING(string)
@@ -1677,6 +1725,111 @@ void caosVM::v_MONK() {
 	caos_assert(c);
 
 	result.setInt(0); // TODO
+}
+
+/**
+ MOTR (command) enable (integer)
+ %status stub
+*/
+void caosVM::c_MOTR() {
+	VM_PARAM_INTEGER(enable)
+
+	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
+
+	// TODO
+}
+
+/**
+ MOTR (integer)
+ %status stub
+*/
+void caosVM::v_MOTR() {
+	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
+
+	result.setInt(1); // TODO
+}
+
+/**
+ MIND (command) enable (integer)
+ %status stub
+*/
+void caosVM::c_MIND() {
+	VM_PARAM_INTEGER(enable)
+
+	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
+
+	// TODO
+}
+
+/**
+ MIND (integer)
+ %status stub
+*/
+void caosVM::v_MIND() {
+	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
+
+	result.setInt(1); // TODO
+}
+
+/**
+ STEP (command) faculty (integer)
+ %status stub
+*/
+void caosVM::c_STEP() {
+	VM_PARAM_INTEGER(faculty)
+
+	c2eCreature *c = getc2eCreature(targ.get());
+	caos_assert(c);
+
+	// TODO
+}
+
+/**
+ SEEN (agent) category (integer)
+ %status maybe
+*/
+void caosVM::v_SEEN() {
+	VM_PARAM_INTEGER(category)
+
+	Creature *c = getTargCreature();
+	caos_assert(c);
+
+	caos_assert(category >= 0);
+	caos_assert((unsigned int)category < c->getNoCategories());
+
+	result.setAgent(c->getChosenAgentForCategory(category));
+}
+
+/**
+ DOIN (command) noinstincts (integer)
+ %status stub
+
+ Make the target creature process the specified number of instincts.
+*/
+void caosVM::c_DOIN() {
+	VM_PARAM_INTEGER(noinstincts)
+
+	Creature *c = getTargCreature();
+	caos_assert(c);
+
+	// TODO
+}
+
+/**
+ INS# (integer)
+ %status maybe
+
+ Return the number of unprocessed instincts left in the instinct queue for the target creature.
+*/
+void caosVM::v_INS() {
+	Creature *c = getTargCreature();
+	caos_assert(c);
+
+	result.setInt(c->getNoUnprocessedInstincts());
 }
 
 // clothes

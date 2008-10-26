@@ -72,6 +72,8 @@ script::script(const Dialect *v, const std::string &fn)
 	// advance past reserved index 0
 	ops.push_back(caosOp(CAOS_NOP, 0, -1));
 	relocations.push_back(0);
+	memset(varRemap, 0xFF, 100);
+	varUsed = 0;
 	linked = false;
 }
 	
@@ -82,6 +84,8 @@ script::script(const Dialect *v, const std::string &fn,
 {
 	ops.push_back(caosOp(CAOS_NOP, 0, -1));
 	relocations.push_back(0);
+	memset(varRemap, 0xFF, 100);
+	varUsed = 0;
 	linked = false;
 }
 
@@ -191,16 +195,21 @@ void evalVisit::operator()(const CAOSCmd &cmd) const {
 }
 
 void evalVisit::operator()(const caosVar &v) const {
+	scr->emitConst(v);
+}
+
+void caosScript::emitConst(const caosVar &v) {
 	if (v.hasInt()) {
 		int val = v.getInt();
 		if (val >= -(1 << 24) && val < (1 << 24)) {
-			scr->emitOp(CAOS_CONSTINT, val);
+			emitOp(CAOS_CONSTINT, val);
 			return;
 		}
 	}
-	scr->current->consts.push_back(v);
-	scr->emitOp(CAOS_CONST, scr->current->consts.size() - 1);
+	current->consts.push_back(v);
+	emitOp(CAOS_CONST, current->consts.size() - 1);
 }
+
 void evalVisit::operator()(const bytestring_t &bs) const {
 	scr->current->bytestrs.push_back(bs);
 	scr->emitOp(CAOS_BYTESTR, scr->current->bytestrs.size() - 1);
@@ -321,6 +330,7 @@ void caosScript::parse(std::istream &in) {
 		int contextlen = 5;
 		int leftct = contextlen;
 		int rightct = contextlen;
+		int prefix = 0;
 
 		if (errindex < leftct) {
 			rightct += leftct - errindex;
@@ -339,6 +349,7 @@ void caosScript::parse(std::istream &in) {
 		if (errindex - leftct != 0) {
 			e.context->push_back(token());
 			e.context->back().payload = std::string("...");
+			prefix = 1;
 		}
 
 		for (int i = errindex - leftct; i < errindex + rightct; i++) {
@@ -348,29 +359,47 @@ void caosScript::parse(std::istream &in) {
 			e.context->push_back(token());
 			e.context->back().payload = std::string("...");
 		}
-		e.ctxoffset = leftct;
+		e.ctxoffset = leftct + prefix;
 		throw;
 	}
 }
 
-const cmdinfo *caosScript::readCommand(token *t, const std::string &prefix) {
+const cmdinfo *caosScript::readCommand(token *t, const std::string &prefix, bool except) {
+	if (!except && t->type() != TOK_WORD)
+		return NULL;
+
 	std::string fullname = prefix + t->word();
-	errindex = t->index + 1;
+	errindex = t->index;
 	const cmdinfo *ci = d->find_command(fullname.c_str());
-	// See if there'{s a subcommand namespace
-	token *t2 = NULL;
-	try {
-		t2 = getToken(TOK_WORD);
-		if (!t2 || t2->type() != TOK_WORD)
-			throw parseException("dummy");
-		return readCommand(t2, fullname + " ");
-	} catch (parseException &e) {
-		if (ci->argtypes && ci->argtypes[0] == CI_SUBCOMMAND)
-			throw;
-		if (t2)
-			putBackToken(t2);
-		return ci;
+
+	if (!ci) {
+		if (!except)
+			return NULL;
+		throw parseException(std::string("Command not found: ") + fullname);
 	}
+
+	// See if there's a subcommand
+	token *t2 = NULL;
+	const cmdinfo *subci = NULL;
+	bool need_subcmd = (ci->argtypes && ci->argtypes[0] == CI_SUBCOMMAND);
+
+	t2 = getToken(ANYTOKEN);
+	if (t2)
+		subci = readCommand(t2, fullname + " ", except && need_subcmd);
+
+	if (subci)
+		return subci;
+
+	// speculative readahead failed, toss back what we have now
+	if (t2)
+		putBackToken(t2);
+
+	if (need_subcmd) {
+		assert(!except); // we should've exceptioned out already if we were going to
+		return NULL;
+	}
+
+	return ci;
 }
 
 void caosScript::emitOp(opcode_t op, int argument) {
@@ -428,6 +457,8 @@ boost::shared_ptr<CAOSExpression> caosScript::readExpr(const enum ci_type xtype)
 			||	!strncmp(t->word().c_str(), "ov", 2)
 			||	!strncmp(t->word().c_str(), "mv", 2)) {
 			int idx = atoi(t->word().c_str() + 2);
+			if (!strncmp(t->word().c_str(), "va", 2))
+				idx = current->mapVAxx(idx);
 			t->payload = t->word().substr(0, 2) + "xx";
 			const cmdinfo *op = readCommand(t, std::string("expr "));
 			t->payload = oldpayload;
@@ -444,6 +475,8 @@ boost::shared_ptr<CAOSExpression> caosScript::readExpr(const enum ci_type xtype)
 		if (	!strncmp(t->word().c_str(), "obv", 3)
 			||	!strncmp(t->word().c_str(), "var", 3)) {
 			int idx = atoi(t->word().c_str() + 3);
+			if (!strncmp(t->word().c_str(), "var", 3))
+				idx = current->mapVAxx(idx);
 			t->payload = t->word().substr(0, 3) + "x";
 			const cmdinfo *op = readCommand(t, std::string("expr "));
 			t->payload = oldpayload;
@@ -708,6 +741,35 @@ void caosScript::parseloop(int state, void *info) {
 				continue;
 			}
 			return;
+		} else if (t->word() == "ssfc") {
+			boost::shared_ptr<CAOSExpression> roomno_e = readExpr(CI_NUMERIC);
+
+			caosVar coordcount = getToken(TOK_CONST)->constval();
+			if (!coordcount.hasInt())
+				throw parseException("Literal integer expected");
+			int count = coordcount.getInt();
+
+			std::vector<std::pair<int, int> > points(count);
+			for (int i = 0; i < count; i++) {
+				caosVar cvx = getToken(TOK_CONST)->constval();
+				if (!cvx.hasInt())
+					throw parseException("Literal integer expected");
+				caosVar cvy = getToken(TOK_CONST)->constval();
+				if (!cvy.hasInt())
+					throw parseException("Literal integer expected");
+				points[i].first = cvx.getInt();
+				points[i].second = cvy.getInt();
+			}
+
+			// emit the values in backwards order
+			for (int i = points.size() - 1; i >= 0; i--) {
+				// y first
+				emitConst(caosVar(points[i].second));
+				emitConst(caosVar(points[i].first));
+			}
+			emitConst(coordcount);
+			emitExpr(roomno_e);
+			emitCmd("cmd ssfc");
 		} else {
 			if (t->word() == "dbg:") {
 				token *t2 = tokenPeek();
@@ -746,4 +808,14 @@ void CAOSExpression::save(caosScript *scr) const {
 int CAOSExpression::cost() const {
 	return boost::apply_visitor(costVisit(), value);
 }
+
+int script::mapVAxx(int index) {
+	assert(index >= 0 && index < 100);
+	if (varRemap[index] != 0xFF) {
+		assert(varRemap[index] < 100);
+		return varRemap[index];
+	}
+	return (varRemap[index] = varUsed++);
+}
+
 /* vim: set noet: */

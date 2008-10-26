@@ -83,6 +83,7 @@ OPENC2E_CORE = \
 	Lift.o \
 	Map.o \
 	MetaRoom.o \
+	mnglexer.o \
 	mmapifstream.o \
 	oldBrain.o \
 	OpenALBackend.o \
@@ -130,19 +131,17 @@ docs.html: ../docs/writehtml.pl commandinfo.yml
 cmddata.cpp: commandinfo.yml ../writecmds.pl
 	perl ../writecmds.pl commandinfo.yml > cmddata.cpp
 
-#lex.mng.cpp lex.mng.h: mng.l
-#	flex -+ --prefix=mng -d -o lex.mng.cpp --header-file=lex.mng.h mng.l
-
 cataloglexer.cpp: cataloglexer.re2c
 	re2c -o cataloglexer.cpp cataloglexer.re2c
 
 caoslexer.cpp: caoslexer.re2c
 	re2c -o caoslexer.cpp caoslexer.re2c
 
-mngfile.o: lex.mng.cpp
+mnglexer.cpp: mnglexer.re2c
+	re2c -o mnglexer.cpp mnglexer.re2c
 
-#mngparser.tab.cpp mngparser.tab.hpp: mngparser.ypp
-#	bison -d --name-prefix=mng mngparser.ypp
+mngparser.tab.cpp mngparser.tab.hpp: mngparser.ypp
+	bison -d --name-prefix=mng mngparser.ypp
 
 catalogue.tab.cpp catalogue.tab.hpp: catalogue.ypp
 	bison -d --name-prefix=cata catalogue.ypp
@@ -160,7 +159,6 @@ catalogue.tab.cpp catalogue.tab.hpp: catalogue.ypp
 
 include $(shell find .deps -name '*.d' -type f 2>/dev/null || true)
 Catalogue.o: catalogue.tab.hpp
-lex.mng.o: mngparser.tab.hpp
 
 Creature_standalone.o: Creature.cpp Creature.o
 	$(CC) $(XCFLAGS) -D_CREATURE_STANDALONE -o $@ -c $<
@@ -200,7 +198,7 @@ tools/braininavat/braininavat: Creature_standalone.o c2eBrain.o streamutils.o ge
 clean:
 	rm -f *.o openc2e openc2e_s filetests praydumper tools/*.o
 	rm -rf .deps
-	rm -f commandinfo.yml lex.yy.cpp lex.yy.h lex.c2.cpp lex.c2.h lex.mng.cpp lex.mng.h mngparser.tab.cpp mngparser.tab.hpp cmddata.cpp
+	rm -f commandinfo.yml lex.yy.cpp lex.yy.h lex.c2.cpp lex.c2.h lex.mng.cpp lex.mng.h mngparser.tab.cpp mngparser.tab.hpp cmddata.cpp mnglexer.cpp
 	rm -f tools/filetests tools/memstats tools/mngtest tools/pathtest tools/praydumper tools/serialtest
 	rm -f headerdeps.dot headerdeps.png
 	rm -f .shake/dump.pl
@@ -216,6 +214,6 @@ headerdeps.dot: $(wildcard *.h) $(wildcard *.hpp) $(wildcard ser/*.h) mngparser.
 headerdeps.png: headerdeps.dot
 	dot -Tpng -o $@ $^
 
-generated: catalogue.tab.hpp cataloglexer.cpp docs.html cmddata.cpp caoslexer.cpp
+generated: catalogue.tab.hpp mngparser.tab.hpp cataloglexer.cpp docs.html cmddata.cpp caoslexer.cpp mnglexer.cpp
 
 .PHONY: clean all dep docs test default

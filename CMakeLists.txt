@@ -3,7 +3,7 @@ PROJECT (OPENC2E CXX C)
 SET(SRC "${OPENC2E_SOURCE_DIR}")
 SET(BIN "${OPENC2E_BINARY_DIR}")
 SET(GEN "${BIN}/generated")
-EXECUTE_PROCESS(COMMAND mkdir "${GEN}" -p)
+EXECUTE_PROCESS(COMMAND mkdir -p "${GEN}")
 
 SET(CMAKE_ALLOW_LOOSE_LOOP_CONSTRUCTS 1)
 SET(CMAKE_MODULE_PATH "${SRC}/cmake")
@@ -28,11 +28,17 @@ ELSE (OPENC2E_USE_SERIALIZATION)
 	SET(SER_SRCS src/caos/caosVM_ser_stub.cpp)
 ENDIF (OPENC2E_USE_SERIALIZATION)
 
+SET(OPENC2E_PROFILE_ALLOCATION "FALSE" CACHE BOOL "Collect allocation profile stats for DBG: SIZO")
+MARK_AS_ADVANCED(FORCE OPENC2E_PROFILE_ALLOCATION)
+IF (OPENC2E_PROFILE_ALLOCATION)
+	ADD_DEFINITIONS("-DPROFILE_ALLOCATION_COUNT -DPROFILE_ALLOCATION_THREAD_SAFE")
+ENDIF (OPENC2E_PROFILE_ALLOCATION)
 
 SET(OPENC2E_CORE
 	src/Agent.cpp
 	src/AgentHelpers.cpp
 	src/AgentRef.cpp
+	src/alloc_count.cpp
 	src/attFile.cpp
 	src/Backend.cpp
 	src/Blackboard.cpp
@@ -76,6 +82,7 @@ SET(OPENC2E_CORE
 	${GEN}/cmddata.cpp
 	src/cobFile.cpp
 	src/CompoundAgent.cpp
+	src/CompoundCreature.cpp
 	src/CompoundPart.cpp
 	src/Creature.cpp
 	src/CreatureAgent.cpp
@@ -87,16 +94,17 @@ SET(OPENC2E_CORE
 	src/genomeFile.cpp
 	src/historyManager.cpp
 	src/imageManager.cpp
-	#	${GEN}/lex.mng.cpp
+	${GEN}/mnglexer.cpp
 	${GEN}/caoslexer.cpp
 	src/Lift.cpp
 	src/Map.cpp
 	src/MetaRoom.cpp
 	src/mmapifstream.cpp
-	#	src/mngfile.cpp
-	#	${GEN}/mngparser.tab.cpp
+	src/mngfile.cpp
+	${GEN}/mngparser.tab.cpp
 	src/oldBrain.cpp
 	src/PathResolver.cpp
+	src/peFile.cpp
 	src/physics.cpp
 	src/PointerAgent.cpp
 	src/Port.cpp
@@ -105,7 +113,6 @@ SET(OPENC2E_CORE
 	src/renderable.cpp
 	src/Room.cpp
 	src/Scriptorium.cpp
-	src/backends/SDLBackend.cpp
 	src/SFCFile.cpp
 	src/SimpleAgent.cpp
 	src/SkeletalCreature.cpp
@@ -118,8 +125,7 @@ SET(OPENC2E_CORE
 )
 
 SET(OPENC2E_SDL
-	# all in the main openc2e listing
-	# XXX: non-sdl-based backends?
+	src/backends/SDLBackend.cpp
 )
 
 SET(OPENC2E_QT
@@ -173,7 +179,7 @@ ELSE(HAVE_STDINT_H)
 ENDIF(HAVE_STDINT_H)
 
 FIND_PACKAGE(SDL REQUIRED)
-#FIND_PACKAGE(SDL_mixer REQUIRED)
+FIND_PACKAGE(SDL_mixer)
 FIND_PACKAGE(SDL_net REQUIRED)
 FIND_PACKAGE(SDL_gfx REQUIRED)
 FIND_PACKAGE(SDL_ttf REQUIRED)
@@ -183,7 +189,9 @@ ELSE(OPENC2E_USE_OPENAL MATCHES "^(YES|AUTO)$")
 	SET(OPENAL_FOUND "NO")
 ENDIF(OPENC2E_USE_OPENAL MATCHES "^(YES|AUTO)$")
 FIND_PACKAGE(ALUT)
-FIND_PACKAGE(Boost REQUIRED)
+
+FIND_PACKAGE(Boost 1.34.0 COMPONENTS program_options filesystem thread regex serialization REQUIRED)
+FIND_LIBRARY(BOOST_SYSTEM_LIBRARY NAMES boost_system-mt)
 IF(OPENC2E_USE_QT)
 	find_package(Qt4 REQUIRED)
 ENDIF(OPENC2E_USE_QT)
@@ -207,10 +215,20 @@ IF(USE_OPENAL STREQUAL "NO")
     SET(OPENAL_LIBRARY "")
     SET(OPENAL_SRC "")
     SET(OPENAL_DEF "")
-ELSE(OPENAL_SRC STREQUAL "")
+ELSE(USE_OPENAL STREQUAL "NO")
     SET(OPENAL_SRC "src/backends/OpenALBackend.cpp")
     SET(OPENAL_DEF "-DOPENAL_SUPPORT")
-ENDIF(OPENAL_SRC STREQUAL "")
+ENDIF(USE_OPENAL STREQUAL "NO")
+
+IF(SDLMIXER_FOUND)
+    SET(SDLMIXER_SRC "src/backends/SDLMixerBackend.cpp")
+    SET(SDLMIXER_DEF "-DSDLMIXER_SUPPORT")
+ELSE(SDLMIXER_FOUND)
+    SET(SDLMIXER_INCLUDE_DIR "")
+    SET(SDLMIXER_LIBRARY "")
+    SET(SDLMIXER_SRC "")
+    SET(SDLMIXER_DEF "")
+ENDIF(SDLMIXER_FOUND)
 
 IF(OPENC2E_USE_QT)
 	include(${QT_USE_FILE})
@@ -223,23 +241,23 @@ IF(OPENC2E_USE_QT)
 ENDIF(OPENC2E_USE_QT)
 
 # Pass flags to the compiler
-ADD_DEFINITIONS("-W -Wall -Wno-conversion -Wno-unused -pthread -D_REENTRANT -DYYERROR_VERBOSE ${OPENAL_DEF} ${QT_DEF}")
+ADD_DEFINITIONS("-W -Wall -Wno-conversion -Wno-unused -D_REENTRANT -DYYERROR_VERBOSE ${OPENAL_DEF} ${QT_DEF} ${SDLMIXER_DEF}")
 
 IF(OPENC2E_USE_QT)
-	SET(FRONTEND_SRCS ${OPENC2E_QT} ${OPENC2E_QT_UIS_H} ${OPENC2E_QT_MOC_SRCS})
+	SET(FRONTEND_SRCS ${OPENC2E_SDL} ${OPENC2E_QT} ${OPENC2E_QT_UIS_H} ${OPENC2E_QT_MOC_SRCS})
 	SET(FRONTEND_LIBS ${QT_LIBRARIES})
 ELSE(OPENC2E_USE_QT)
 	SET(FRONTEND_SRCS ${OPENC2E_SDL})
 	SET(FRONTEND_LIBS)
 ENDIF(OPENC2E_USE_QT)
-ADD_EXECUTABLE(openc2e ${OPENC2E_CORE} ${FRONTEND_SRCS} ${OPENAL_SRC} ${SER_SRCS})
+ADD_EXECUTABLE(openc2e ${OPENC2E_CORE} ${FRONTEND_SRCS} ${OPENAL_SRC} ${SDLMIXER_SRC} ${SER_SRCS})
 
 TARGET_LINK_LIBRARIES(openc2e z m pthread 
 	${SDL_LIBRARY}
-#	${SDLMIXER_LIBRARY} 
 	${SDLNET_LIBRARY}
 	${SDLTTF_LIBRARY}
 	${SDLGFX_LIBRARY}
+	${SDLMIXER_LIBRARY}
 	${OPENAL_LIBRARY}
 	${ALUT_LIBRARY}
 	${FRONTEND_LIBS}
@@ -249,6 +267,9 @@ TARGET_LINK_LIBRARIES(openc2e z m pthread
 	boost_thread-mt
 	boost_regex-mt
 	)
+IF(BOOST_SYSTEM_LIBRARY)
+TARGET_LINK_LIBRARIES(openc2e boost_system-mt)
+ENDIF(BOOST_SYSTEM_LIBRARY)
 
 LINK_DIRECTORIES(${Boost_LIBRARY_DIRS})
 
@@ -256,10 +277,10 @@ INCLUDE_DIRECTORIES(BEFORE
 	${GEN}
 	${SRC}/src
 	${SDL_INCLUDE_DIR}
-#	${SDLMIXER_INCLUDE_DIR}
 	${SDLNET_INCLUDE_DIR}
 	${SDLTTF_INCLUDE_DIR}
 	${SDLGFX_INCLUDE_DIR}
+	${SDLMIXER_INCLUDE_DIR}
 	${OPENAL_INCLUDE_DIR}
 	${ALUT_INCLUDE_DIR}
 	${Boost_INCLUDE_DIR}
@@ -313,6 +334,18 @@ ADD_CUSTOM_COMMAND(
 	DEPENDS ${SRC}/src/caoslexer.re2c
 	WORKING_DIRECTORY ${SRC})
 
+ADD_CUSTOM_COMMAND(
+	OUTPUT ${GEN}/mnglexer.cpp
+	COMMAND re2c -o ${GEN}/mnglexer.cpp ${SRC}/src/mnglexer.re2c
+	DEPENDS ${SRC}/src/mnglexer.re2c
+	WORKING_DIRECTORY ${SRC})
+
+ADD_CUSTOM_COMMAND(
+	OUTPUT ${GEN}/mngparser.tab.cpp ${GEN}/mngparser.tab.hpp
+	COMMAND bison -d --name-prefix=mng --file-prefix="${GEN}/mngparser" src/mngparser.ypp
+	DEPENDS src/mngparser.ypp
+	WORKING_DIRECTORY ${SRC})
+
 #ADD_CUSTOM_COMMAND(
 #	OUTPUT ${GEN}/lex.mng.cpp ${GEN}/lex.mng.h
 #	COMMAND flex -+ --prefix=mng -d -o ${GEN}/lex.mng.cpp --header-file=${GEN}/lex.mng.h mng.l
@@ -331,6 +364,8 @@ ADD_CUSTOM_TARGET(docs ALL DEPENDS ${BIN}/caosdocs.html ${BIN}/docs.css ${BIN}/o
 ADD_CUSTOM_TARGET(generated DEPENDS
 	${GEN}/catalogue.tab.cpp ${GEN}/catalogue.tab.hpp
 	${GEN}/caoslexer.cpp
+	${GEN}/mngparser.tab.cpp ${GEN}/mngparser.tab.hpp
+	${GEN}/mnglexer.cpp
 	${GEN}/cataloglexer.cpp
 	${GEN}/cmddata.cpp
 	#	${GEN}/lex.mng.cpp ${GEN}/lex.mng.h

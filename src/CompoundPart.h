@@ -80,6 +80,8 @@ protected:
 	unsigned int frameno;
 	AnimatablePart(Agent *p, unsigned int _id, int _x, int _y, int _z) : CompoundPart(p, _id, _x, _y, _z) { frameno = 0; }
 
+	void updateAnimation();
+
 public:
 	bytestring_t animation;
 	virtual void setPose(unsigned int p) = 0;
@@ -113,6 +115,7 @@ public:
 	void setFramerate(unsigned char f) { framerate = f; framedelay = 0; }
 	void setBase(unsigned int b);
 	void changeSprite(std::string spritefile, unsigned int fimg);
+	void changeSprite(shared_ptr<creaturesImage> spr);
 	void tint(unsigned char r, unsigned char g, unsigned char b, unsigned char rotation, unsigned char swap);
 	virtual bool isTransparent() { return is_transparent; }
 	bool transparentAt(unsigned int x, unsigned int y);

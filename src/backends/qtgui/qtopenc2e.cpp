@@ -21,6 +21,7 @@
 #include "Engine.h"
 #include "AudioBackend.h"
 #include "MetaRoom.h"
+#include "Camera.h"
 
 #include "Hatchery.h"
 #include "AgentInjector.h"
@@ -33,8 +34,41 @@
 
 #include "version.h"
 
-// Constructor which creates the main window.
+#include "peFile.h"
 
+QPixmap imageFromExeResource(unsigned int resourceid) {
+	assert(engine.getExeFile());
+
+	resourceInfo *r = engine.getExeFile()->getResource(PE_RESOURCETYPE_BITMAP, HORRID_LANG_ENGLISH, resourceid);
+	if (!r) r = engine.getExeFile()->getResource(PE_RESOURCETYPE_BITMAP, 0x400, resourceid);
+	if (!r) return QPixmap();
+
+	unsigned int size = r->getSize() + 14;
+	char *bmpdata = (char *)malloc(size);
+
+	// fake a BITMAPFILEHEADER
+	bmpdata[0] = 'B'; bmpdata[1] = 'M';
+	memcpy(bmpdata + 2, &size, 4);
+	memset(bmpdata + 6, 0, 8);
+
+	memcpy(bmpdata + 14, r->getData(), r->getSize());
+
+	QPixmap i;
+	i.loadFromData((const uchar *)bmpdata, (int)size);
+	i.setMask(i.createHeuristicMask());
+
+	free(bmpdata);
+
+	return i;
+}
+
+QIcon iconFromImageList(QPixmap l, unsigned int n) {
+	unsigned int x = n * (l.height() + 1);
+	QPixmap img = l.copy(x, 0, l.height() + 1, l.height());
+	return img;
+}
+
+// Constructor which creates the main window.
 QtOpenc2e::QtOpenc2e(boost::shared_ptr<QtBackend> backend) {
 	viewport = new openc2eView(this, backend);
 	setCentralWidget(viewport);
@@ -55,6 +89,32 @@ QtOpenc2e::QtOpenc2e(boost::shared_ptr<QtBackend> backend) {
 	setWindowTitle(titlebar.c_str());
 	resize(800, 600);
 
+	hatchery = new Hatchery(this);
+	agentInjector = new AgentInjector(this);
+	brainViewer = new BrainViewer(this);
+	connect(this, SIGNAL(ticked()), brainViewer, SLOT(onTick()));
+
+	creatureGrapher = new CreatureGrapher(this);
+	connect(this, SIGNAL(ticked()), creatureGrapher, SLOT(onCreatureTick())); // TODO
+	creatureGrapherDock = new QDockWidget(this);
+	creatureGrapherDock->hide();
+	creatureGrapherDock->setWidget(creatureGrapher);
+	creatureGrapherDock->setFloating(true);
+	creatureGrapherDock->resize(QSize(300, 300));
+	creatureGrapherDock->setWindowTitle(tr("Creature Grapher"));
+
+	constructMenus();
+
+	if (engine.version == 2 && engine.getExeFile()) {
+		loadC2Images();
+		createC2Toolbars();
+		setupC2Statusbar();
+	}
+
+	onCreatureChange();
+}
+
+void QtOpenc2e::constructMenus() {
 	/* File menu */
 
 	exitAct = new QAction(tr("&Exit"), this);
@@ -137,7 +197,7 @@ QtOpenc2e::QtOpenc2e(boost::shared_ptr<QtBackend> backend) {
 	hatcheryAct = new QAction(tr("&Hatchery"), this);
 	connect(hatcheryAct, SIGNAL(triggered()), this, SLOT(showHatchery()));
 	toolsMenu->addAction(hatcheryAct);
-	if (engine.version > 1) hatcheryAct->setEnabled(false);
+	if (engine.version > 2) hatcheryAct->setEnabled(false);
 
 	agentInjectorAct = new QAction(tr("&Agent Injector"), this);
 	connect(agentInjectorAct, SIGNAL(triggered()), this, SLOT(showAgentInjector()));
@@ -147,20 +207,6 @@ QtOpenc2e::QtOpenc2e(boost::shared_ptr<QtBackend> backend) {
 	connect(brainViewerAct, SIGNAL(triggered()), this, SLOT(showBrainViewer()));
 	toolsMenu->addAction(brainViewerAct);
 
-	if (engine.version == 1)
-		hatchery = new Hatchery(this);
-	agentInjector = new AgentInjector(this);
-	brainViewer = new BrainViewer(this);
-	connect(this, SIGNAL(ticked()), brainViewer, SLOT(onTick()));
-
-	creatureGrapher = new CreatureGrapher(this);
-	connect(this, SIGNAL(ticked()), creatureGrapher, SLOT(onCreatureTick())); // TODO
-	creatureGrapherDock = new QDockWidget(this);
-	creatureGrapherDock->hide();
-	creatureGrapherDock->setWidget(creatureGrapher);
-	creatureGrapherDock->setFloating(true);
-	creatureGrapherDock->resize(QSize(300, 300));
-	creatureGrapherDock->setWindowTitle(tr("Creature Grapher"));
 	toolsMenu->addAction(creatureGrapherDock->toggleViewAction());
 
 	/* Creatures menu */
@@ -178,6 +224,208 @@ QtOpenc2e::QtOpenc2e(boost::shared_ptr<QtBackend> backend) {
 
 	helpMenu = menuBar()->addMenu(tr("&Help"));
 	helpMenu->addAction(aboutAct);
+}
+
+/*
+ * We obviously can't distribute the Creatures 2 icons with openc2e,
+ * so we just use the ones in the Creatures2.exe file.
+ */
+void QtOpenc2e::loadC2Images() {
+	// we always use the 21x21 icon set
+	standardicons = imageFromExeResource(0xe3);
+	handicons = imageFromExeResource(0xe4);
+	favtoolbaricons = imageFromExeResource(0xe5);
+	appleticons = imageFromExeResource(0xe6);
+
+	for (unsigned int i = 0; i < 4; i++)
+		seasonicon[i] = imageFromExeResource(0x98 + i);
+
+	timeofdayicon[0] = imageFromExeResource(0xa3);
+	timeofdayicon[1] = imageFromExeResource(0xc4);
+	timeofdayicon[2] = imageFromExeResource(0xc2);
+	timeofdayicon[3] = imageFromExeResource(0xc3);
+	timeofdayicon[4] = imageFromExeResource(0xc5);
+
+	for (unsigned int i = 0; i < 5; i++)
+		temperatureicon[i] = imageFromExeResource(0xa4 + i);
+
+	healthicon[0] = imageFromExeResource(0xe8); // dead (gray)
+	healthicon[1] = imageFromExeResource(0xc7); // 0/4
+	healthicon[2] = imageFromExeResource(0xac); // 1/4
+	healthicon[3] = imageFromExeResource(0xad); // 2/4
+	healthicon[4] = imageFromExeResource(0xab); // 3/4
+	healthicon[5] = imageFromExeResource(0xaa); // 4/4
+
+	hearticon[0] = imageFromExeResource(0xe9); // dead (gray)
+	hearticon[1] = imageFromExeResource(0xae); // large
+	hearticon[2] = imageFromExeResource(0xaf); // medium
+	hearticon[3] = imageFromExeResource(0xb0); // small
+}
+
+void QtOpenc2e::createC2Toolbars() {
+	QToolBar *stdtoolbar = new QToolBar("Standard", this);
+	stdtoolbar->setIconSize(QSize(22, 21));
+
+	toolbarnextaction = stdtoolbar->addAction(iconFromImageList(standardicons, 0), "Next");
+	toolbareyeviewaction = stdtoolbar->addAction(iconFromImageList(standardicons, 1), "Eye View");
+	toolbareyeviewaction->setCheckable(true);
+	toolbartrackaction = stdtoolbar->addAction(iconFromImageList(standardicons, 2), "Track");
+	toolbartrackaction->setCheckable(true);
+	toolbarhaloaction = stdtoolbar->addAction(iconFromImageList(standardicons, 3), "Halo");
+	toolbarhaloaction->setCheckable(true);
+
+	toolbarplayaction = stdtoolbar->addAction(iconFromImageList(standardicons, 4), "Play");
+	stdtoolbar->insertSeparator(toolbarplayaction);
+	toolbarpauseaction = stdtoolbar->addAction(iconFromImageList(standardicons, 5), "Pause");
+	QActionGroup *playpausegroup = new QActionGroup(this);
+	playpausegroup->addAction(toolbarplayaction);
+	playpausegroup->addAction(toolbarpauseaction);
+	toolbarplayaction->setCheckable(true);
+	toolbarpauseaction->setCheckable(true);
+	toolbarplayaction->setChecked(true);
+
+	toolbarhelpaction = stdtoolbar->addAction(iconFromImageList(standardicons, 6), "Help");
+	stdtoolbar->insertSeparator(toolbarhelpaction);
+	toolbarwebaction = stdtoolbar->addAction(iconFromImageList(standardicons, 7), "Web");
+
+	addToolBar(stdtoolbar);
+
+	QToolBar *handtoolbar = new QToolBar("Pointer", this);
+	handtoolbar->setIconSize(QSize(22, 21));
+
+	toolbarinvisibleaction = handtoolbar->addAction(iconFromImageList(handicons, 0), "Invisible");
+	toolbarinvisibleaction->setCheckable(true);
+	toolbarteachaction = handtoolbar->addAction(iconFromImageList(handicons, 1), "Teach");
+	handtoolbar->insertSeparator(toolbarteachaction);
+	toolbarpushaction = handtoolbar->addAction(iconFromImageList(handicons, 2), "Push");
+	QActionGroup *teachpushgroup = new QActionGroup(this);
+	teachpushgroup->addAction(toolbarteachaction);
+	teachpushgroup->addAction(toolbarpushaction);
+	toolbarteachaction->setCheckable(true);
+	toolbarpushaction->setCheckable(true);
+	toolbarteachaction->setChecked(true);
+	addToolBar(handtoolbar);
+
+	QToolBar *applettoolbar = new QToolBar("Applets", this);
+	applettoolbar->setIconSize(QSize(22, 21));
+
+	toolbarhatcheryaction = applettoolbar->addAction(iconFromImageList(appleticons, 0), "Hatchery");
+	toolbarhatcheryaction->setCheckable(true);
+	connect(toolbarhatcheryaction, SIGNAL(triggered()), this, SLOT(toggleHatchery()));
+
+	QAction *toolbarownersaction = applettoolbar->addAction(iconFromImageList(appleticons, 2), "Owner's Kit");
+	toolbarownersaction->setCheckable(true);
+	toolbarownersaction->setEnabled(false);
+
+	QAction *toolbarhealthaction = applettoolbar->addAction(iconFromImageList(appleticons, 3), "Health Kit");
+	toolbarhealthaction->setCheckable(true);
+	toolbarhealthaction->setEnabled(false);
+
+	QAction *toolbargraveyardaction = applettoolbar->addAction(iconFromImageList(appleticons, 9), "Graveyard");
+	toolbargraveyardaction->setCheckable(true);
+	toolbargraveyardaction->setEnabled(false);
+
+	applettoolbar->addSeparator();
+
+	QAction *tempaction;
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 5), "Unknown Applet"); // breeder's kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 4), "Unknown Applet"); // science kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 12), "Unknown Applet"); // neuroscience kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 6), "Unknown Applet"); // observation kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	applettoolbar->addSeparator();
+
+	toolbaragentaction = applettoolbar->addAction(iconFromImageList(appleticons, 7), "Agent Injector");
+	toolbaragentaction->setCheckable(true);
+	connect(toolbaragentaction, SIGNAL(triggered()), this, SLOT(toggleAgentInjector()));
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 8), "Unknown Applet"); // history kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	tempaction = applettoolbar->addAction(iconFromImageList(appleticons, 1), "Unknown Applet"); // ecology kit?
+	tempaction->setCheckable(true); tempaction->setEnabled(false);
+
+	addToolBar(applettoolbar);
+
+	addToolBarBreak();
+
+	QToolBar *favtoolbar = new QToolBar("Favourites", this);
+	favtoolbar->setIconSize(QSize(22, 21));
+
+	QLabel *speechlabel = new QLabel("Speech History:", this);
+	favtoolbar->addWidget(speechlabel);
+	speechcombo = new QComboBox(this);
+	speechcombo->setMinimumContentsLength(15);
+	speechcombo->setEditable(true);
+	favtoolbar->addWidget(speechcombo);
+	QAction *sayaction = favtoolbar->addAction(iconFromImageList(favtoolbaricons, 0), "Say");
+
+	QLabel *placelabel = new QLabel("Places:", this);
+	favtoolbar->insertSeparator(favtoolbar->addWidget(placelabel));
+	placecombo = new QComboBox(this);
+	placecombo->setMinimumContentsLength(15);
+	favtoolbar->addWidget(placecombo);
+	QAction *goaction = favtoolbar->addAction(iconFromImageList(favtoolbaricons, 1), "Go");
+	
+	placecombo->addItem("The Incubator"); // TODO
+
+	addToolBar(favtoolbar);
+
+	QMenu *toolbarsMenu = viewMenu->addMenu(tr("&Toolbars"));
+	toolbarsMenu->addAction(stdtoolbar->toggleViewAction());
+	toolbarsMenu->addAction(handtoolbar->toggleViewAction());
+	toolbarsMenu->addAction(applettoolbar->toggleViewAction());
+	toolbarsMenu->addAction(favtoolbar->toggleViewAction());
+}
+
+void QtOpenc2e::setupC2Statusbar() {
+	QLabel *w;
+
+	seasontext = new QLabel(this);
+	seasontext->setText("Spring");
+	statusBar()->addWidget(seasontext);
+
+	seasonimage = new QLabel(this);
+	seasonimage->setPixmap(seasonicon[0]);
+	statusBar()->addWidget(seasonimage);
+
+	yeartext = new QLabel(this);
+	yeartext->setText("Year: 000");
+	statusBar()->addWidget(yeartext);
+
+	timeofdayimage = new QLabel(this);
+	timeofdayimage->setPixmap(timeofdayicon[0]);
+	statusBar()->addWidget(timeofdayimage);
+
+	// TODO: textual temperature
+	temperatureimage = new QLabel(this);
+	temperatureimage->setPixmap(temperatureicon[0]);
+	statusBar()->addWidget(temperatureimage);
+
+	w = new QLabel(this);
+	w->setText("Health:");
+	statusBar()->addPermanentWidget(w);
+
+	healthimage = new QLabel(this);
+	healthimage->setPixmap(healthicon[0]);
+	statusBar()->addPermanentWidget(healthimage);
+
+	heartimage = new QLabel(this);
+	heartimage->setPixmap(hearticon[0]);
+	statusBar()->addPermanentWidget(heartimage);
+
+	QPixmap blank = imageFromExeResource(0xc6);
+	iconimage = new QLabel(this);
+	iconimage->setPixmap(blank);
+	statusBar()->addPermanentWidget(iconimage);
 }
 
 QtOpenc2e::~QtOpenc2e() {
@@ -222,25 +470,27 @@ void QtOpenc2e::updateCreaturesMenu() {
 		if (!p) continue; // grr, but needed
 
 		CreatureAgent *a = dynamic_cast<CreatureAgent *>(p.get());
-		if (a) {
-			// TODO: add breed?
-			std::string creaturename = creatureNameFor(a);
-			if (creaturename.empty()) creaturename = "<Unnamed>";
-			creaturename += std::string(" (") + (a->getCreature()->isFemale() ? "Female" : "Male") + ")";
-
-			// create a new action with menu as parent, so it'll be destroyed on clear()
-			QAction *creatureSelectAct = new QAction(creaturename.c_str(), creaturesMenu);
-			creatureSelectAct->setData(QVariant::fromValue((void *)a));
-
-			creatureSelectAct->setCheckable(true);
-			if (world.selectedcreature == p) creatureSelectAct->setChecked(true);
-			connect(creatureSelectAct, SIGNAL(triggered()), this, SLOT(selectCreature()));
+		if (!a) continue;
 			
-			if (monikerDataFor(a).getStatus() != borncreature)
-				creatureSelectAct->setDisabled(true);
+		if (p->genus != 1) continue; // TODO: check ettin/grendel status
 
-			creaturesMenu->addAction(creatureSelectAct);
-		}
+		// TODO: add breed?
+		std::string creaturename = creatureNameFor(p);
+		if (creaturename.empty()) creaturename = "<Unnamed>";
+		creaturename += std::string(" (") + (a->getCreature()->isFemale() ? "Female" : "Male") + ")";
+
+		// create a new action with menu as parent, so it'll be destroyed on clear()
+		QAction *creatureSelectAct = new QAction(creaturename.c_str(), creaturesMenu);
+		creatureSelectAct->setData(QVariant::fromValue((void *)p.get()));
+
+		creatureSelectAct->setCheckable(true);
+		if (world.selectedcreature == p) creatureSelectAct->setChecked(true);
+		connect(creatureSelectAct, SIGNAL(triggered()), this, SLOT(selectCreature()));
+
+		if (monikerDataFor(p).getStatus() != borncreature)
+			creatureSelectAct->setDisabled(true);
+
+		creaturesMenu->addAction(creatureSelectAct);
 	}
 
 	if (creaturesMenu->isEmpty()) {
@@ -265,6 +515,16 @@ void QtOpenc2e::onCreatureChange() {
 	}
 
 	setWindowTitle(titlebar.c_str());	
+
+	if (engine.version == 2 && engine.getExeFile()) {
+		bool hc = world.selectedcreature;
+
+		toolbareyeviewaction->setEnabled(hc);
+		toolbartrackaction->setEnabled(hc);
+		toolbarhaloaction->setEnabled(hc);
+
+		// TODO: applets
+	}
 }
 
 void QtOpenc2e::tick() {
@@ -274,11 +534,11 @@ void QtOpenc2e::tick() {
 
 	bool didtick = engine.tick();
 
-	int y = world.camera.getY();
-	int x = world.camera.getX();
+	int y = world.camera->getY();
+	int x = world.camera->getX();
 	viewport->tick();
-	viewport->horizontalScrollBar()->setValue(x - world.camera.getMetaRoom()->x());
-	viewport->verticalScrollBar()->setValue(y - world.camera.getMetaRoom()->y());
+	viewport->horizontalScrollBar()->setValue(x - world.camera->getMetaRoom()->x());
+	viewport->verticalScrollBar()->setValue(y - world.camera->getMetaRoom()->y());
 	
 	if (engine.done) close();
 
@@ -304,6 +564,8 @@ void QtOpenc2e::tick() {
 	unsigned int i = engine.msUntilTick();
 	if (i != 0 || ourTimer->interval() != 0) // TODO: things get a bit annoyingly unresponsive without this
 		ourTimer->setInterval(i);
+
+	updateAppletStatus(); // TODO: hack
 }
 
 // action handlers
@@ -316,6 +578,48 @@ void QtOpenc2e::updateMenus() {
 	muteAct->setChecked(engine.audio->isMuted());
 	if (world.paused) pauseAct->setText("&Play");
 	else pauseAct->setText("&Pause");
+}
+
+void QtOpenc2e::updateAppletStatus() {
+	if (engine.version == 2 && engine.getExeFile()) {
+		// TODO: this really doesn't belong here
+		if (world.paused) {
+			if (toolbarplayaction->isChecked()) world.paused = false;
+		} else {
+			if (toolbarpauseaction->isChecked()) world.paused = true;
+		}
+
+		// disable/enable buttons if we moved between paused and unpaused
+		if (world.paused && toolbarinvisibleaction->isEnabled()) {
+			toolbarinvisibleaction->setEnabled(false);
+			toolbarteachaction->setEnabled(false);
+			toolbarpushaction->setEnabled(false);
+		} else if (!world.paused && !toolbarinvisibleaction->isEnabled()) {
+			toolbarinvisibleaction->setEnabled(true);
+			toolbarteachaction->setEnabled(true);
+			toolbarpushaction->setEnabled(true);
+		}
+
+		// update applet buttons based on whether the applet is visible
+		toolbarhatcheryaction->setChecked(hatchery->isVisible());
+		toolbaragentaction->setChecked(agentInjector->isVisible());
+
+		// update 'next creature' button depending on whether there's any creatures we can select
+		bool are_there_creatures_present = false;
+		for (std::list<boost::shared_ptr<Agent> >::iterator i = world.agents.begin(); i != world.agents.end(); i++) {
+			boost::shared_ptr<Agent> p = *i;
+			if (!p) continue; // grr, but needed
+
+			CreatureAgent *a = dynamic_cast<CreatureAgent *>(p.get());
+			if (!a) continue;
+
+			if (p->genus != 1) continue; // TODO: check ettin/grendel status
+
+			are_there_creatures_present = true;
+			break;
+		}
+		toolbarnextaction->setEnabled(are_there_creatures_present);
+	}
 }
 
 void QtOpenc2e::about() {
@@ -333,11 +637,30 @@ void QtOpenc2e::about() {
 void QtOpenc2e::showHatchery() {
 	hatchery->show();
 	hatchery->activateWindow();
+	updateAppletStatus();
+}
+
+void QtOpenc2e::toggleHatchery() {
+	if (hatchery->isVisible()) {
+		hatchery->hide();
+	} else {
+		hatchery->show();
+		hatchery->activateWindow();
+	}
 }
 
 void QtOpenc2e::showAgentInjector() {
 	agentInjector->show();
 	agentInjector->activateWindow();
+}
+
+void QtOpenc2e::toggleAgentInjector() {
+	if (agentInjector->isVisible()) {
+		agentInjector->hide();
+	} else {
+		agentInjector->show();
+		agentInjector->activateWindow();
+	}
 }
 
 void QtOpenc2e::showBrainViewer() {
@@ -432,6 +755,10 @@ void QtOpenc2e::newNorn() {
 }
 
 void QtOpenc2e::newEgg() {
+	makeNewEgg();
+}
+
+void QtOpenc2e::makeNewEgg() {
 	std::string eggscript;
 	/* create the egg obj */
 	eggscript = boost::str(boost::format("new: simp eggs 8 %d 2000 0\n") % ((rand() % 6) * 8));

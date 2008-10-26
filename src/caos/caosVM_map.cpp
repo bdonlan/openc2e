@@ -19,6 +19,7 @@
 
 #include "caosVM.h"
 #include "World.h"
+#include "Engine.h" // version
 #include "MetaRoom.h"
 #include "Room.h"
 #include <assert.h>
@@ -1043,7 +1044,8 @@ void caosVM::c_ROOM() {
 
 		MetaRoom *m = world.map.getMetaRoom(0);
 		unsigned int roomid = m->addRoom(r);
-		assert(roomid == (unsigned int)roomno); // TODO: this is fairly likely to fail, but is a major bug if it does, FIX ME!
+		//assert(roomid == (unsigned int)roomno); // TODO: this is fairly likely to fail, but is a major bug if it does, FIX ME!
+		r->id = roomno;
 	} else {
 		r->x_left = left;
 		r->x_right = right;
@@ -1083,6 +1085,8 @@ void caosVM::c_ROOM_c2() {
 	shared_ptr<Room> r = world.map.getRoom(roomno);
 	if (!r) {
 		r = shared_ptr<Room>(new Room(left, right, top, top, bottom, bottom));
+		MetaRoom *m = world.map.getMetaRoom(0);
+		unsigned int roomid = m->addRoom(r);
 		r->id = roomno;
 	} else {
 		r->x_left = left;
@@ -1116,14 +1120,19 @@ void caosVM::c_ROOM_c2() {
  Returns 0 if no such room.
 
  data: 0 is left, 1 is top, 2 is right, 3 is bottom, 4 is room type.
+ for c2: 5 is floor value, 6 is organic nutrient, 7 is inorganic nutrient,
+ 8 is temperature, 9 is pressure, 10 is wind x, 11 is wind y, 12 is light,
+ 13 is radiation, 14 is heat source, 15 is pressure source, 16 is light
+ source, 17 is radiation source, 18 is the visited flag and 19 is the
+ drop status
 */
 void caosVM::v_ROOM_c1() {
 	// TODO: the original docs here (for C1) said 1 is right and 2 is top, check?
 
-	VM_PARAM_INTEGER(data) caos_assert(data >= 0 && data <= 4);
+	VM_PARAM_INTEGER(data) caos_assert(data >= 0 && data <= (engine.version == 1 ? 4 : 19));
 	VM_PARAM_INTEGER(roomno)
 
-	shared_ptr<Room> r = world.map.getRoom(data);
+	shared_ptr<Room> r = world.map.getRoom(roomno);
 	if (!r) {
 		result.setInt(0);
 		return;
@@ -1149,9 +1158,65 @@ void caosVM::v_ROOM_c1() {
 		case 4:
 			result.setInt(r->type.getInt());
 			break;
+		
+		case 5:
+			result.setInt(r->floorvalue.getInt());
+			break;
 
-		default:
-			// TODO: c2 has a whole bunch of other data possibilities (fix check on data above too!)
+		case 6:
+			result.setInt(r->ontr.getInt());
+			break;
+
+		case 7:
+			result.setInt(r->intr.getInt());
+			break;
+
+		case 8:
+			result.setInt(r->temp.getInt());
+			break;
+
+		case 9:
+			result.setInt(r->pres.getInt());
+			break;
+
+		case 10:
+			result.setInt(r->windx);
+			break;
+
+		case 11:
+			result.setInt(r->windy);
+			break;
+
+		case 12:
+			result.setInt(r->lite.getInt());
+			break;
+
+		case 13:
+			result.setInt(r->radn.getInt());
+			break;
+
+		case 14:
+			result.setInt(r->hsrc.getInt());
+			break;
+
+		case 15:
+			result.setInt(r->psrc.getInt());
+			break;
+
+		case 16:
+			result.setInt(r->lsrc.getInt());
+			break;
+
+		case 17:
+			result.setInt(r->rsrc.getInt());
+			break;
+
+		case 18:
+			result.setInt(0); // TODO: visited
+			break;
+
+		case 19:
+			result.setInt(r->dropstatus.getInt());
 			break;
 	}
 }
@@ -1170,5 +1235,49 @@ CAOS_LVALUE(WRAP,
 		caosVar((int)mr->wraparound()),
 		mr->setWraparound(newvalue.getInt())
 		)
+
+/**
+ SSFC (command) roomno (integer) count (integer) x1 (integer) y1 (integer)
+ %status maybe
+ %pragma variants c2
+ %pragma stackdelta any
+
+ Set floor points of the specified rooms.
+ You must provide 'count' pairs of (x, y) coordinates as parameters, relative to the room, and with the y coordinates inverted (ie, 0 is the bottom of the room).
+ The coordinates must start at the left side of the room, and end on the right side.
+ Count can be zero, which removes any existing floor points.
+*/
+void caosVM::c_SSFC() {
+	// Note: due to parser hacks, our arguments are passed in a different order than normal
+	VM_PARAM_INTEGER(roomno);
+	VM_PARAM_INTEGER(coordcount);
+
+	caos_assert(coordcount >= 0); // this should never happen unless the parser breaks or we load a bad savefile
+
+	shared_ptr<Room> r = world.map.getRoom(roomno);
+	caos_assert(r);
+
+	r->floorpoints.clear();
+
+	int lastx = -1;
+	for (int i = 0; i < coordcount; i++) {
+		VM_PARAM_INTEGER(x);
+		VM_PARAM_INTEGER(y);
+
+		// check that coordinates are positive
+		caos_assert(x >= 0);
+		caos_assert(y >= 0);
+
+		// check that coordinates go from left to right
+		caos_assert(x > lastx);
+		lastx = x;
+
+		// check that coordinates lie within room
+		caos_assert((unsigned int)x <= (r->x_right - r->x_left));
+		caos_assert((unsigned int)y <= (r->y_left_floor - r->y_left_ceiling));
+
+		r->floorpoints.push_back(std::pair<unsigned int, unsigned int>(x, y));
+	}
+}
 
 /* vim: set noet: */

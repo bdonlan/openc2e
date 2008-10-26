@@ -24,11 +24,29 @@
 #include "mmapifstream.h"
 #include "endianlove.h"
 
+class bmpImage;
+
+class bmpData {
+private:
+	friend class bmpImage;
+
+	bmpData(mmapifstream *, std::string n);
+
+	uint32 biWidth, biHeight;
+	uint32 biCompression;
+	void *bmpdata;
+	bool copied_data;
+	uint8 *palette;
+	imageformat imgformat;
+	mmapifstream *stream;
+
+public:
+	~bmpData(); // shared_ptr needs to be able to call the destructor
+};
+
 class bmpImage : public creaturesImage {
 protected:
-	uint32 biWidth, biHeight;
-	void *bmpdata;
-
+	boost::shared_ptr<bmpData> bmpdata;
 	void freeData();
 
 public:
@@ -36,6 +54,9 @@ public:
 	~bmpImage();
 
 	void setBlockSize(unsigned int blockwidth, unsigned int blockheight);
+
+	bool hasCustomPalette() { return imgformat == if_paletted; }
+	uint8 *getCustomPalette() { return bmpdata->palette; }
 };
 
 #endif

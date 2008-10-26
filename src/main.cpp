@@ -23,6 +23,9 @@
 #include <iostream>
 #include "Engine.h"
 #include "backends/SDLBackend.h"
+#ifdef SDLMIXER_SUPPORT
+#include "backends/SDLMixerBackend.h"
+#endif
 #ifdef OPENAL_SUPPORT
 #include "backends/OpenALBackend.h"
 #endif
@@ -53,6 +56,9 @@ extern "C" int main(int argc, char *argv[]) {
 		boost::shared_ptr<QtBackend> qtbackend = boost::shared_ptr<QtBackend>(new QtBackend());
 		boost::shared_ptr<Backend> qtbackend_generic = boost::dynamic_pointer_cast<class Backend, class QtBackend>(qtbackend);
 		engine.addPossibleBackend("qt", qtbackend_generic); // last-added backend is default
+#endif
+#ifdef SDLMIXER_SUPPORT
+		engine.addPossibleAudioBackend("sdlmixer", shared_ptr<AudioBackend>(new SDLMixerBackend()));
 #endif
 #ifdef OPENAL_SUPPORT
 		engine.addPossibleAudioBackend("openal", shared_ptr<AudioBackend>(new OpenALBackend()));

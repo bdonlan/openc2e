@@ -29,6 +29,7 @@
 #include "Vehicle.h"
 #include "AgentHelpers.h"
 #include "creaturesImage.h"
+#include "Camera.h"
 
 void Agent::core_init() {
 	initialized = false;
@@ -36,15 +37,26 @@ void Agent::core_init() {
 }
 
 Agent::Agent(unsigned char f, unsigned char g, unsigned short s, unsigned int p) :
-  vm(0), zorder(p), timerrate(0), visible(true) {
+  vm(0), zorder(p), timerrate(0), attr(0), visible(true) {
 	core_init();
 
 	setClassifier(f, g, s);
 
 	lastScript = -1;
-	
+
+	x = 0; y = 0; // note that c2e agents are moved in finishInit
+
+	has_custom_core_size = false;
+
 	velx.setFloat(0.0f);
 	vely.setFloat(0.0f);
+
+	avel = 0.0f; fvel = 0.0f; svel = 0.0f;
+	admp = 0.0f; fdmp = 0.0f; sdmp = 0.0f;
+	spin = 0.0f;
+
+	spritesperrotation = 0;
+	numberrotations = 0;
 
 	wasmoved = false;
 
@@ -55,7 +67,7 @@ Agent::Agent(unsigned char f, unsigned char g, unsigned short s, unsigned int p)
 		
 		size = 127; // TODO: correct default?
 		thrt = 0;
-		// TODO: it looks like grav should be 0, but make sure!
+		falling = false; // TODO: it looks like grav should be 0, but make sure!
 	} else if (engine.version > 2) {
 		accg = 0.3f;
 		aero = 0;
@@ -64,6 +76,8 @@ Agent::Agent(unsigned char f, unsigned char g, unsigned short s, unsigned int p)
 		perm = 50; // TODO: correct default?
 		falling = true;
 	}
+
+	moved_last_tick = false;
 	
 	range = 500;
 
@@ -101,7 +115,7 @@ void Agent::finishInit() {
 	world.agents.push_front(boost::shared_ptr<Agent>(this));
 	agents_iter = world.agents.begin();
 
-	if (findScript(10))
+	if (engine.version > 2 && findScript(10))
 		queueScript(10); // constructor
 	
 	initialized = true;
@@ -163,7 +177,7 @@ void Agent::floatTo(float x, float y) {
 	if (floatingagent) {
 		moveTo(floatingagent->x + x, floatingagent->y + y);
 	} else {
-		moveTo(world.camera.getX() + x, world.camera.getY() + y);
+		moveTo(world.camera->getX() + x, world.camera->getY() + y);
 	}
 }
 
@@ -171,14 +185,14 @@ void Agent::floatSetup() {
 	if (floatingagent)
 		floatingagent->addFloated(this);
 	else
-		world.camera.addFloated(this);
+		world.camera->addFloated(this);
 }
 
 void Agent::floatRelease() {
 	if (floatingagent) {
 		floatingagent->delFloated(this);
 	} else
-		world.camera.delFloated(this);
+		world.camera->delFloated(this);
 }
 
 void Agent::addFloated(AgentRef a) {
@@ -386,11 +400,11 @@ bool agentOnCamera(Agent *targ, bool checkall = false); // caosVM_camera.cpp
 static bool inrange_at(const MetaRoom *room, float x, float y, unsigned int width, unsigned int height) {
 	const static unsigned int buffer = 500;
 
-	if (world.camera.getMetaRoom() != room)
+	if (world.camera->getMetaRoom() != room)
 		return false;
-	if (x + buffer < world.camera.getX() || x + width - buffer > world.camera.getX() + world.camera.getWidth())
+	if (x + buffer < world.camera->getX() || x + width - buffer > world.camera->getX() + world.camera->getWidth())
 		return false;
-	if (y + buffer < world.camera.getY() || y + height - buffer > world.camera.getY() + world.camera.getHeight())
+	if (y + buffer < world.camera->getY() || y + height - buffer > world.camera->getY() + world.camera->getHeight())
 		return false;
 	return true;
 }
@@ -426,10 +440,13 @@ void Agent::updateAudio(boost::shared_ptr<AudioSource> s) {
 }
 
 Point const Agent::boundingBoxPoint(unsigned int n) {
-	return boundingBoxPoint(n, Point(x, y), getWidth(), getHeight());
+	if (has_custom_core_size)
+		return boundingBoxPoint(n, Point(x + custom_core_xleft, y + custom_core_ytop), custom_core_xright - custom_core_xleft, custom_core_ybottom - custom_core_ytop);
+	else
+		return boundingBoxPoint(n, Point(x, y), getWidth(), getHeight());
 }
 
-Point const Agent::boundingBoxPoint(unsigned int n, Point in, unsigned int w, unsigned int h) {
+Point const Agent::boundingBoxPoint(unsigned int n, Point in, float w, float h) {
 	Point p;
 	
 	switch (n) {
@@ -466,10 +483,13 @@ bool Agent::validInRoomSystem() {
 	// TODO: c1
 	if (engine.version == 1) return true;
 
-	return validInRoomSystem(Point(x, y), getWidth(), getHeight(), perm);
+	if (has_custom_core_size)
+		return validInRoomSystem(Point(x + custom_core_xleft, y + custom_core_ytop), custom_core_xright - custom_core_xleft, custom_core_ybottom - custom_core_ytop, perm);
+	else
+		return validInRoomSystem(Point(x, y), getWidth(), getHeight(), perm);
 }
 
-bool const Agent::validInRoomSystem(Point p, unsigned int w, unsigned int h, int testperm) {
+bool Agent::validInRoomSystem(Point p, float w, float h, int testperm) {
 	// Return true if this agent is inside the world room system at the specified point, or false if it isn't.
 	MetaRoom *m = world.map.metaRoomAt(p.x, p.y);
 	if (!m) return false;
@@ -527,6 +547,8 @@ void Agent::physicsTick() {
 		return;
 	}
 
+	if (!falling) return; // TODO: there are probably all sorts of issues here, untested
+
 	if (!wasmoved) return; // some agents are created outside INST and get autokilled if we try physics on them before they move
 
 	if (invehicle) return; // TODO: c2e verhicle physics
@@ -535,10 +557,34 @@ void Agent::physicsTick() {
 	float destx = x + velx.getFloat();
 	float desty = y + vely.getFloat();
 
+	if (rotatable()) {
+		// TODO: the real engine seems to reset velx/vely, so i do that here, but why?
+		velx.setFloat(0.0f); vely.setFloat(0.0f);
+
+		// TODO: which order should these be in?
+
+		// calculate forwards velocity
+		float forward_x = fvel * sinf(spin * (M_PI * 2));
+		float forward_y = fvel * -cosf(spin * (M_PI * 2));
+
+		// calculate sideways velocity
+		// TODO: this sideways velocity code is untested
+		float sideways_x = svel * cosf(spin * (M_PI * 2));
+		float sideways_y = svel * -sinf(spin * (M_PI * 2));
+
+		// set destination based on forward/sideways velocity
+		destx = x + forward_x + sideways_x;
+		desty = y + forward_y + sideways_y;
+
+		// modify spin based on angular velocity
+		spin = fmodf(spin + avel, 1.0f);
+		if (spin < 0.0f) spin += 1.0f;
+	}
+
 	if (sufferphysics()) {
 		// TODO: falling behaviour needs looking at more closely..
 		// .. but it shouldn't be 'false' by default on non-physics agents, so..
-		falling = false;
+		//falling = false;
 		// increase speed according to accg
 		// TODO: should we be changing vely first, instead of after a successful move (below)?
 		desty += accg.getFloat();
@@ -578,6 +624,7 @@ void Agent::physicsTick() {
 					unhandledException(boost::str(boost::format("out of room system at (%f, %f)") % srcx % srcy), false);
 				}
 				displaycore = true;
+				falling = false;
 				return; // out of room system
 			}
 			
@@ -663,10 +710,17 @@ void Agent::physicsTick() {
 				} else				
 					vely.setFloat(0);
 			} else if (sufferphysics() && accg != 0) {
-				falling = true; // TODO: icky
 				vely.setFloat(vely.getFloat() + accg.getFloat());
 			}
-		} else { velx.setFloat(0); vely.setFloat(0); } // TODO: correct?
+		} else {
+			// TODO: correct?
+			if (sufferphysics()) {
+				if (velx.getFloat() == 0.0f && vely.getFloat() == 0.0f)
+					falling = false;
+			}
+			velx.setFloat(0);
+			vely.setFloat(0);
+		}
 	} else {
 		if (vely.hasDecimal() || velx.hasDecimal())
 			moveTo(destx, desty);
@@ -679,6 +733,12 @@ void Agent::physicsTick() {
 		// TODO: aero should be an integer!
 		velx.setFloat(velx.getFloat() - (velx.getFloat() * (aero.getFloat() / 100.0f)));
 		vely.setFloat(vely.getFloat() - (vely.getFloat() * (aero.getFloat() / 100.0f)));
+	}
+
+	if (rotatable()) {
+		avel -= avel * admp;
+		fvel -= fvel * fdmp;
+		svel -= svel * sdmp;
 	}
 }
 
@@ -713,7 +773,7 @@ shared_ptr<Room> const Agent::bestRoomAt(unsigned int tryx, unsigned int tryy, u
 }
 
 // Creatures 2 collision finding
-void const Agent::findCollisionInDirection(unsigned int i, class MetaRoom *m, Point src, int &dx, int &dy, Point &deltapt, double &delta, bool &collided, bool followrooms) {
+void Agent::findCollisionInDirection(unsigned int i, class MetaRoom *m, Point src, int &dx, int &dy, Point &deltapt, double &delta, bool &collided, bool followrooms) {
 	src.x = (int)src.x;
 	src.y = (int)src.y;
 
@@ -727,12 +787,12 @@ void const Agent::findCollisionInDirection(unsigned int i, class MetaRoom *m, Po
 	if (!room) { // out of room system
 		if (!displaycore)
 			unhandledException(boost::str(boost::format("out of room system at (%f, %f)") % src.x % src.y), false);
-		grav.setInt(0);
+		falling = false;
 		displaycore = true;
 		return;
 	}
 
-	int lastdirection;
+	int lastdirection = 0;
 
 	bool steep = abs(dy) > abs(dx);
 
@@ -743,10 +803,40 @@ void const Agent::findCollisionInDirection(unsigned int i, class MetaRoom *m, Po
 
 	Point lastpoint(0,0);
 
+	Vehicle *vehicle = 0;
+	if (invehicle) vehicle = dynamic_cast<Vehicle *>(invehicle.get());
+
 	for (int loc = 0; loc <= abs(steep ? dy : dx); loc++) {
 		Point p = steep ? l.pointAtY(loc*signdy) : l.pointAtX(loc*signdx);
 		p.x = (int)p.x;
 		p.y = (int)p.y;
+
+		if (vehicle) {
+			if (src.x + p.x < vehicle->x + vehicle->cabinleft) {
+				lastdirection = 0;
+				collided = true;
+				break;
+			}
+			if (src.x + p.x > vehicle->x + vehicle->cabinright) {
+				lastdirection = 1;
+				collided = true;
+				break;
+			}
+			if (src.y + p.y < vehicle->y + vehicle->cabintop) {
+				lastdirection = 2;
+				collided = true;
+				break;
+			}
+			if (src.y + p.y > vehicle->y + vehicle->cabinbottom) {
+				lastdirection = 3;
+				collided = true;
+				break;
+			}
+
+			lastpoint = p;
+
+			continue;
+		}
 
 		bool trycollisions = false;
 
@@ -828,18 +918,18 @@ void const Agent::findCollisionInDirection(unsigned int i, class MetaRoom *m, Po
 void Agent::physicsTickC2() {
 	int dx = velx.getInt(), dy = vely.getInt();
 
-	if (dx != 0 || dy != 0) grav.setInt(1);
+	if (dx != 0 || dy != 0) falling = true;
 
-	if (grav.getInt() != 0 && sufferphysics()) {
+	if (falling && sufferphysics()) {
 		dy += accg.getInt();
 	}
 
-	grav.setInt(1);
+	falling = true;
 
 	if (dy == 0 && dx == 0) { // nothing to do
 		if (vely.getInt() == 0) {
 			// really no motion
-			grav.setInt(0);
+			falling = false;
 		} else {
 			// y motion cancelled by gravity
 			vely.setInt(dy);
@@ -858,7 +948,7 @@ void Agent::physicsTickC2() {
 		if (!m) {
 			if (!displaycore)
 				unhandledException(boost::str(boost::format("out of room system at (%f, %f)") % x % y), false);
-			grav.setInt(0);
+			falling = false;
 			displaycore = true;
 			return;
 		}
@@ -872,7 +962,7 @@ void Agent::physicsTickC2() {
 		deltapt.y = dy;
 	}
 	
-	if (collided && (velx.getInt() != 0 || vely.getInt() != 0)) {
+	if (collided && (velx.getInt() != 0 || vely.getInt() != 0) && moved_last_tick) {
 		if (lastcollidedirection >= 2) // up and down
 			vely.setInt(-(vely.getInt() - (rest.getInt() * vely.getInt()) / 100));
 		else
@@ -880,10 +970,14 @@ void Agent::physicsTickC2() {
 		queueScript(6, 0);	
 	}
 	if ((int)deltapt.x == 0 && (int)deltapt.y == 0) {
-		grav.setInt(0);
-		velx.setInt(0);
-		vely.setInt(0);
+		if (!moved_last_tick) {
+			falling = false;
+			velx.setInt(0);
+			vely.setInt(0);
+		}
+		moved_last_tick = false;
 	} else {
+		moved_last_tick = true;
 		moveTo(x + (int)deltapt.x, y + (int)deltapt.y);
 		if (sufferphysics()) {
 			int fricx = (aero.getInt() * velx.getInt()) / 100;
@@ -923,6 +1017,17 @@ void Agent::tick() {
 			r->catemp[emitca_index] += emitca_amount;
 			/*if (r->catemp[emitca_index] <= 0.0f) r->catemp[emitca_index] = 0.0f;
 			else if (r->catemp[emitca_index] >= 1.0f) r->catemp[emitca_index] = 1.0f;*/
+		}
+	}
+
+	// TODO: this might be in the wrong place - note that parts are ticked *before* Agent::tick is called
+	if (rotatable() && spritesperrotation != 0 && numberrotations > 1) {
+		SpritePart *p = dynamic_cast<SpritePart *>(part(0));
+		if (p) {
+			// change base according to our SPIN and the ROTN settings
+			unsigned int rotation = 0;
+			rotation = (spin - (0.5f / numberrotations)) * numberrotations; // TODO: verify correctness
+			p->setBase(spritesperrotation * rotation);
 		}
 	}
 
@@ -1065,10 +1170,7 @@ unsigned int Agent::getZOrder() const {
 		// TODO: take notice of cabp in c2e, at least. also, stacking .. ?
 		Vehicle *v = dynamic_cast<Vehicle *>(invehicle.get());
 		assert(v);
-		if (engine.version < 3)
-			return v->cabinplane; // TODO: correct?
-		else
-			return v->getZOrder() + v->cabinplane;
+		return v->getZOrder() + v->cabinplane;
 		// TODO: Vehicle should probably rearrange zorder of passengers if ever moved
 	} else if (carriedby) {
 		// TODO: check for overflow
@@ -1173,9 +1275,8 @@ bool Agent::beDropped() {
 	// TODO: this doesn't reorder children or anything..
 	setZOrder(zorder);
 
-	// TODO: no idea if this is right, it tries to re-enable gravity when dropping C2 agents
-	if (engine.version == 2) grav.setInt(1);
-	if (engine.version == 3) falling = true;
+	// TODO: no idea if this is right, it tries to re-enable gravity when dropping agents
+	falling = true;
 
 	/* if our carrying agent was in a vehicle, we stay in the vehicle */
 	if (wascarriedby && wascarriedby->invehicle) {
@@ -1317,6 +1418,8 @@ bool Agent::tryMoveToPlaceAround(float x, float y) {
 		moveTo(x, y);
 		return true;
 	}
+
+	// TODO: fix for has_custom_core_size case
 
 	// second hacky attempt, move from side to side (+/- width) and up (- height) a little
 	unsigned int trywidth = getWidth() * 2; if (trywidth < 100) trywidth = 100;

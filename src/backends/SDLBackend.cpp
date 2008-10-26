@@ -279,13 +279,14 @@ void SDLSurface::renderText(int x, int y, std::string text, unsigned int colour,
 
 //*** code to mirror 16bpp surface - slow, we should cache this!
 
-Uint16 *pixelPtr(SDL_Surface *surf, int x, int y) {
-	return (Uint16 *)((Uint8 *)surf->pixels + (y * surf->pitch) + (x * 2));
+Uint8 *pixelPtr(SDL_Surface *surf, int x, int y, int bytesperpixel) {
+	return (Uint8 *)surf->pixels + (y * surf->pitch) + (x * bytesperpixel);
 }
 
-SDL_Surface *MirrorSurface(SDL_Surface *surf) {
-	SDL_Surface* newsurf = SDL_CreateRGBSurface(SDL_HWSURFACE, surf->w, surf->h, surf->format->BitsPerPixel, surf->format->Rmask, surf->format->Gmask, surf->format->Bmask, surf->format->Amask);
+SDL_Surface *MirrorSurface(SDL_Surface *surf, SDL_Color *surfpalette) {
+	SDL_Surface* newsurf = SDL_CreateRGBSurface(SDL_SWSURFACE, surf->w, surf->h, surf->format->BitsPerPixel, surf->format->Rmask, surf->format->Gmask, surf->format->Bmask, surf->format->Amask);
 	assert(newsurf);
+	if (surfpalette) SDL_SetPalette(newsurf, SDL_LOGPAL, surfpalette, 0, 256);
 	SDL_BlitSurface(surf, 0, newsurf, 0);
 
 	if (SDL_MUSTLOCK(newsurf))
@@ -296,11 +297,44 @@ SDL_Surface *MirrorSurface(SDL_Surface *surf) {
 
 	for (int y = 0; y < newsurf->h; y++) {
 		for (int x = 0; x < (newsurf->w / 2); x++) {
-			Uint16 *one = pixelPtr(newsurf, x, y);
-			Uint16 *two = pixelPtr(newsurf, (newsurf->w - 1) - x, y);
-			Uint16 temp = *one;
-			*one = *two;
-			*two = temp;
+			switch (surf->format->BitsPerPixel) {
+				case 8:
+					{
+					Uint8 *one = pixelPtr(newsurf, x, y, 1);
+					Uint8 *two = pixelPtr(newsurf, (newsurf->w - 1) - x, y, 1);
+					Uint8 temp = *one;
+					*one = *two;
+					*two = temp;
+					}
+					break;
+
+				case 16:
+					{
+					Uint16 *one = (Uint16 *)pixelPtr(newsurf, x, y, 2);
+					Uint16 *two = (Uint16 *)pixelPtr(newsurf, (newsurf->w - 1) - x, y, 2);
+					Uint16 temp = *one;
+					*one = *two;
+					*two = temp;
+					}
+					break;
+
+				case 24:
+					{
+						Uint8 *one = pixelPtr(newsurf, x, y, 3);
+						Uint8 *two = pixelPtr(newsurf, (newsurf->w - 1) - x, y, 3);
+						Uint8 temp[3];
+						temp[0] = *one; temp[1] = *(one + 1); temp[2] = *(one + 2);
+						*one = *two; *(one + 1) = *(two + 1); *(one + 2) = *(two + 2);
+						*two = temp[0]; *(two + 1) = temp[1]; *(two + 2) = temp[2];
+					
+					}
+					break;
+
+				default:
+					if (SDL_MUSTLOCK(newsurf)) SDL_UnlockSurface(newsurf);
+					SDL_FreeSurface(newsurf);
+					throw creaturesException("SDLBackend failed to mirror surface");
+			}
 		}
 	}
 	
@@ -314,6 +348,7 @@ SDL_Surface *MirrorSurface(SDL_Surface *surf) {
 
 void SDLSurface::render(shared_ptr<creaturesImage> image, unsigned int frame, int x, int y, bool trans, unsigned char transparency, bool mirror, bool is_background) {
 	assert(image);
+	assert(image->numframes() > frame);
 
 	// don't bother rendering off-screen stuff
 	if (x >= (int)width) return; if (y >= (int)height) return;
@@ -322,6 +357,7 @@ void SDLSurface::render(shared_ptr<creaturesImage> image, unsigned int frame, in
 
 	// create surface
 	SDL_Surface *surf;
+	SDL_Color *surfpalette = 0;
 	if (image->format() == if_paletted) {
 		surf = SDL_CreateRGBSurfaceFrom(image->data(frame),
 						image->width(frame), image->height(frame),
@@ -329,7 +365,11 @@ void SDLSurface::render(shared_ptr<creaturesImage> image, unsigned int frame, in
 						image->width(frame), // pitch
 						0, 0, 0, 0);
 		assert(surf);
-		SDL_SetPalette(surf, SDL_LOGPAL, palette, 0, 256);
+		if (image->hasCustomPalette())
+			surfpalette = (SDL_Color *)image->getCustomPalette();
+		else
+			surfpalette = palette;
+		SDL_SetPalette(surf, SDL_LOGPAL, surfpalette, 0, 256);
 	} else if (image->format() == if_16bit) {
 		unsigned int rmask, gmask, bmask;
 		if (image->is565()) {
@@ -358,7 +398,7 @@ void SDLSurface::render(shared_ptr<creaturesImage> image, unsigned int frame, in
 	// try mirroring, if necessary
 	try {
 		if (mirror) {
-			SDL_Surface *newsurf = MirrorSurface(surf);
+			SDL_Surface *newsurf = MirrorSurface(surf, surfpalette);
 			SDL_FreeSurface(surf);
 			surf = newsurf;
 		}
