@@ -2,6 +2,7 @@
 #define ZLIBSTREAM_H
 
 #include <boost/iostreams/stream.hpp>
+#include <boost/shared_ptr.hpp>
 #include <zlib.h>
 #include <iostream>
 
@@ -34,9 +35,9 @@ class zlib_exception : public std::exception {
  * unused data off a filter - thus the trailer data after the zlib stream
  * would be lost
  */
-class zlib_source {
+class zlib_buf {
 	private:
-		zlib_source(zlib_source &) : save_mask(NULL) { abort(); }
+		zlib_buf(zlib_buf &) : save_mask(NULL) { abort(); }
 	protected:
 		class saveexcept {
 			protected:
@@ -61,13 +62,29 @@ class zlib_source {
 		void refill();
 		void rewind();
 	public:
-		typedef char char_type;
-		typedef io::source_tag category;
-
-		zlib_source(std::istream *st);
-		~zlib_source();
+		zlib_buf(std::istream *st);
+		~zlib_buf();
 
 		std::streamsize read(char *s, std::streamsize n);
 
+};
+
+
+class zlib_source {
+	protected:
+		boost::shared_ptr<zlib_buf> bufp;
+	public:
+		zlib_source(std::istream *is) {
+			bufp = boost::shared_ptr<zlib_buf>(new zlib_buf(is));
+		}
+		zlib_source(const zlib_source &zs) : bufp(zs.bufp) { }
+
+		typedef char char_type;
+		typedef io::source_tag category;
+
+
+		std::streamsize read(char *s, std::streamsize n) {
+			return bufp->read(s, n);
+		}
 };
 #endif

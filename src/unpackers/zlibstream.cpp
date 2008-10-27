@@ -1,6 +1,6 @@
 #include "zlibstream.h"
 
-zlib_source::zlib_source(std::istream *is) : save_mask(is) {
+zlib_buf::zlib_buf(std::istream *is) : save_mask(is) {
 	int zret;
 	this->is = is;
 	// enable exceptions
@@ -21,12 +21,12 @@ zlib_source::zlib_source(std::istream *is) : save_mask(is) {
 	eos = 0;
 }
 
-zlib_source::~zlib_source() {
+zlib_buf::~zlib_buf() {
 	rewind();
 	inflateEnd(&zst);
 
 }
-void zlib_source::rewind() {
+void zlib_buf::rewind() {
 	if (is->fail() && !is->eof()) // we're already aborting
 		return;
 	is->clear(); // clear EOF bits
@@ -34,7 +34,7 @@ void zlib_source::rewind() {
 	is->seekg((unsigned int)initpos + zst.total_in, std::ios_base::beg);
 }
 
-void zlib_source::refill() {
+void zlib_buf::refill() {
 	char *readbase = inbuf;
 	if (zst.avail_in == sizeof(inbuf))
 		return;
@@ -50,7 +50,7 @@ void zlib_source::refill() {
 	}
 }
 
-std::streamsize zlib_source::read(char *s, std::streamsize n) {
+std::streamsize zlib_buf::read(char *s, std::streamsize n) {
 	int zret;
 	zst.next_out = (Bytef*)s;
 	zst.avail_out = n;
