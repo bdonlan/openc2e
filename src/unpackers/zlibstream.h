@@ -6,8 +6,6 @@
 #include <zlib.h>
 #include <iostream>
 
-namespace io = boost::iostreams;
-
 class zlib_exception : public std::exception {
 	protected:
 		const char *whatbuf;
@@ -80,7 +78,7 @@ class zlib_source {
 		zlib_source(const zlib_source &zs) : bufp(zs.bufp) { }
 
 		typedef char char_type;
-		typedef io::source_tag category;
+		typedef boost::iostreams::source_tag category;
 
 
 		std::streamsize read(char *s, std::streamsize n) {
