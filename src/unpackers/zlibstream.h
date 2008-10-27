@@ -7,25 +7,25 @@
 
 namespace io = boost::iostreams;
 
-class zlib_exception : std::exception {
+class zlib_exception : public std::exception {
 	protected:
-		const char *what;
+		const char *whatbuf;
 		char *alloc_what;
 	public:
 		zlib_exception(const char *what) throw() {
-			this->what = what;
+			this->whatbuf = what;
 			this->alloc_what = NULL;
 		}
 		zlib_exception(const std::string &s) {
 			this->alloc_what = strdup(s.c_str());
 			if (!this->alloc_what)
-				throw std::bad_alloc("out of memory");
-			this->what = alloc_what;
+				throw std::bad_alloc();
+			this->whatbuf = alloc_what;
 		}
-		const char *what() throw() {
-			return this->what;
+		const char *what() const throw() {
+			return this->whatbuf;
 		}
-		~zlib_exception() {
+		~zlib_exception() throw () {
 			free(alloc_what);
 		}
 };
@@ -35,11 +35,13 @@ class zlib_exception : std::exception {
  * would be lost
  */
 class zlib_source {
+	private:
+		zlib_source(zlib_source &) : save_mask(NULL) { abort(); }
 	protected:
 		class saveexcept {
 			protected:
 				std::istream *is;
-				ios::iostate except_mask;
+				std::ios::iostate except_mask;
 			public:
 				saveexcept(std::istream *is) {
 					this->is = is;
@@ -49,10 +51,11 @@ class zlib_source {
 					is->exceptions(this->except_mask);
 				}
 		};
-		std::istream *st;
+		std::istream *is;
 		z_stream zst;
 		char inbuf[16384];
 		int eos;
+		std::streampos initpos;
 		saveexcept save_mask;
 
 		void refill();
