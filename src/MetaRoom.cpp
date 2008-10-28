@@ -24,6 +24,8 @@
 #include "images/blkImage.h"
 #include <assert.h>
 #include "Backend.h"
+#include <boost/lambda/bind.hpp>
+#include "debug_counter.h"
 
 MetaRoom::MetaRoom(int _x, int _y, int _width, int _height, const std::string &back, shared_ptr<creaturesImage> spr, bool wrap)
 	: rooms(rooms_mut)
@@ -38,6 +40,25 @@ MetaRoom::MetaRoom(int _x, int _y, int _width, int _height, const std::string &b
 			addBackground(back);
 		}
 	}
+}
+
+StaticQuadTree<shared_ptr<Room> > *MetaRoom::getLookupTree() {
+	if (quickLookup)
+		return quickLookup.get();
+
+	std::vector<std::pair<QuadRegion, shared_ptr<Room> > > tvect;
+	tvect.reserve(rooms.size());
+
+	for (BOOST_AUTO(it, rooms.begin()); it != rooms.end(); it++) {
+		BOOST_AUTO(p, *it);
+		QuadRegion r(p->x_left, p->x_right,
+				std::min(p->y_left_ceiling, p->y_right_ceiling),
+				std::max(p->y_left_floor, p->y_right_floor));
+		tvect.push_back(std::pair<QuadRegion, shared_ptr<Room> >(r, p));
+	}
+
+	quickLookup.reset(new StaticQuadTree<shared_ptr<Room> >(tvect));
+	return quickLookup.get();
 }
 
 void MetaRoom::addBackground(std::string back, shared_ptr<creaturesImage> spr) {
@@ -134,6 +155,7 @@ shared_ptr<Room> MetaRoom::nextFloorFromPoint(float x, float y) {
 unsigned int MetaRoom::addRoom(shared_ptr<Room> r) {
 	// add to both our local list and the global list
 	rooms_mut.push_back(r);
+	quickLookup.reset();
 	world.map.rooms.push_back(r);
 
 	// set the id and return
@@ -141,16 +163,52 @@ unsigned int MetaRoom::addRoom(shared_ptr<Room> r) {
 	return r->id;
 }
 
+struct roomAtCB {
+	float x, y;
+	shared_ptr<Room> r;
+
+	bool operator()(const shared_ptr<Room> &room) {
+		if (room->containsPoint(x, y)) {
+			r = room;
+			return true;
+		}
+		return false;
+	}
+};
+
 shared_ptr<Room> MetaRoom::roomAt(float _x, float _y) {
+	using namespace boost::lambda;
 	if (wraps) {
 		if (_x > (int)xloc + (int)wid) _x -= wid;
 		else if (_x < (int)xloc) _x += wid;
 	}
 
+	roomAtCB cb;
+
+	cb.x = _x;
+	cb.y = _y;
+
+	getLookupTree()->lookup((unsigned int)_x, (unsigned int)_y, cb);
+	if (cb.r) {
+		DEBUG_COUNTER(quadhit)++;
+		return cb.r;
+	}
+	DEBUG_COUNTER(quadmiss)++;
 	for (BOOST_AUTO(i, rooms.begin()); i != rooms.end(); i++) {
 		shared_ptr<Room> r = *i;
-		if (r->containsPoint(_x, _y)) return r;
+		if (r->containsPoint(_x, _y)) {
+			DEBUG_COUNTER(quadrealmiss)++;
+			std::cerr << "miss, room @ "
+				<< boost::format("%d:[%d-%d] %d:[%d-%d], looking for %f,%f")
+				   % r->x_left % r->y_left_ceiling % r->y_left_floor
+				   % r->x_right % r->y_right_ceiling % r->y_right_floor
+				   % _x % _y
+				<< std::endl;
+			
+			return r;
+		}
 	}
+	DEBUG_COUNTER(roommiss)++;
 
 	return shared_ptr<Room>();
 }

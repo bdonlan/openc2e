@@ -27,6 +27,7 @@
 #include "dialect.h"
 #include <algorithm>
 #include "caosScript.h"
+#include "debug_counter.h"
 
 // #include "malloc.h" <- unportable horror!
 #include <sstream>
@@ -350,6 +351,23 @@ void caosVM::c_DBG_TSLC() {
 */
 void caosVM::v_DBG_TSLC() {
 	result.setInt(timeslice);
+}
+
+/**
+DBG: QTST (string)
+%status ok
+%pragma variants all
+
+ Returns some debug counters related to the room quadtree system
+ */
+void caosVM::v_DBG_QTST() {
+	result.setString(boost::str(
+				boost::format("hit %d miss %s(badmiss %d + truemiss %d)")
+				% DEBUG_COUNTER(quadhit)
+				% DEBUG_COUNTER(quadmiss)
+				% DEBUG_COUNTER(quadrealmiss)
+				% DEBUG_COUNTER(roommiss)
+				));
 }
 
 /**

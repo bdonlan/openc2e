@@ -24,6 +24,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include "staticquadtree.h"
 
 class creaturesImage;
 
@@ -38,6 +39,9 @@ protected:
 	std::vector<shared_ptr<class Room> > rooms_mut;
 	MetaRoom() : rooms(rooms_mut) { }
 
+	boost::scoped_ptr<StaticQuadTree<shared_ptr<Room> > > quickLookup;
+
+	StaticQuadTree<shared_ptr<Room> > *getLookupTree();
 public:
 
 	const std::vector<shared_ptr<class Room> > &rooms;

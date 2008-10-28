@@ -486,6 +486,7 @@ public:
 	void v_DBG_STOK();
 	void c_DBG_TSLC();
 	void v_DBG_TSLC();
+	void v_DBG_QTST();
 	void v_DBG_SIZO();
 
 	// agent

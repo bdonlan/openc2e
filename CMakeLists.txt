@@ -122,6 +122,7 @@ SET(OPENC2E_CORE
 	src/World.cpp
 	src/main.cpp
 	src/util.cpp
+	src/staticquadtree.cpp
 )
 
 SET(OPENC2E_SDL
