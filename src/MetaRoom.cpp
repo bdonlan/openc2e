@@ -25,7 +25,9 @@
 #include <assert.h>
 #include "Backend.h"
 
-MetaRoom::MetaRoom(int _x, int _y, int _width, int _height, const std::string &back, shared_ptr<creaturesImage> spr, bool wrap) {
+MetaRoom::MetaRoom(int _x, int _y, int _width, int _height, const std::string &back, shared_ptr<creaturesImage> spr, bool wrap)
+	: rooms(rooms_mut)
+{
 	xloc = _x; yloc = _y; wid = _width; hei = _height; wraps = wrap;
 
 	// if we were provided with a background, add it
@@ -112,7 +114,7 @@ MetaRoom::~MetaRoom() {
 shared_ptr<Room> MetaRoom::nextFloorFromPoint(float x, float y) {
 	shared_ptr<Room> closest_up, closest_down;
 	float dist_down = -1, dist_up = -1;
-	for (std::vector<shared_ptr<Room> >::iterator r = rooms.begin(); r != rooms.end(); r++) {
+	for (BOOST_AUTO(r, rooms.begin()); r != rooms.end(); r++) {
 		if (!(*r)->bot.containsX(x)) continue;
 		float dist = (*r)->bot.pointAtX(x).y - y; // down is positive
 		float absdist = fabs(dist);
@@ -131,7 +133,7 @@ shared_ptr<Room> MetaRoom::nextFloorFromPoint(float x, float y) {
 
 unsigned int MetaRoom::addRoom(shared_ptr<Room> r) {
 	// add to both our local list and the global list
-	rooms.push_back(r);
+	rooms_mut.push_back(r);
 	world.map.rooms.push_back(r);
 
 	// set the id and return
@@ -145,7 +147,7 @@ shared_ptr<Room> MetaRoom::roomAt(float _x, float _y) {
 		else if (_x < (int)xloc) _x += wid;
 	}
 
-	for (std::vector<shared_ptr<Room> >::iterator i = rooms.begin(); i != rooms.end(); i++) {
+	for (BOOST_AUTO(i, rooms.begin()); i != rooms.end(); i++) {
 		shared_ptr<Room> r = *i;
 		if (r->containsPoint(_x, _y)) return r;
 	}
@@ -161,7 +163,7 @@ std::vector<shared_ptr<Room> > MetaRoom::roomsAt(float _x, float _y) {
 
 	std::vector<shared_ptr<Room> > ourlist;
 
-	for (std::vector<shared_ptr<Room> >::iterator i = rooms.begin(); i != rooms.end(); i++) {
+	for (BOOST_AUTO(i, rooms.begin()); i != rooms.end(); i++) {
 		shared_ptr<Room> r = *i;
 		if (r->containsPoint(_x, _y)) ourlist.push_back(r);
 	}

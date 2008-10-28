@@ -35,10 +35,12 @@ protected:
 	shared_ptr<creaturesImage> firstback;
 	bool wraps;
 	
-	MetaRoom() { }
+	std::vector<shared_ptr<class Room> > rooms_mut;
+	MetaRoom() : rooms(rooms_mut) { }
 
 public:
-	std::vector<shared_ptr<class Room> > rooms;
+
+	const std::vector<shared_ptr<class Room> > &rooms;
 
 	unsigned int x() { return xloc; }
 	unsigned int y() { return yloc; }

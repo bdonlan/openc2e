@@ -35,6 +35,7 @@
 #include "Camera.h"
 
 #include <boost/format.hpp>
+#include <boost/typeof/typeof.hpp> // BOOST_AUTO
 #include <boost/filesystem/convenience.hpp>
 namespace fs = boost::filesystem;
 
@@ -461,7 +462,7 @@ void World::drawWorld(Camera *cam, Surface *surface) {
 
 	if (showrooms) {
 		shared_ptr<Room> r = map.roomAt(hand()->x, hand()->y);
-		for (std::vector<shared_ptr<Room> >::iterator i = cam->getMetaRoom()->rooms.begin();
+		for (BOOST_AUTO(i, cam->getMetaRoom()->rooms.begin());
 				 i != cam->getMetaRoom()->rooms.end(); i++) {
 			unsigned int col = 0xFFFF00CC;
 			if (*i == r) col = 0xFF00FFCC;

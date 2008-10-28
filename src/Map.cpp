@@ -23,6 +23,7 @@
 #include "MetaRoom.h"
 #include <iostream>
 #include "Engine.h"
+#include <boost/typeof/typeof.hpp> // BOOST_AUTO
 
 void Map::Reset() {
 	for (std::vector<MetaRoom *>::iterator i = metarooms.begin(); i != metarooms.end(); i++) {
@@ -75,15 +76,17 @@ void Map::tick() {
 	if (engine.version < 3) return; // TODO: tick rooms in C2
 
 	// Three passes..
-	for (std::vector<MetaRoom *>::iterator m = metarooms.begin(); m != metarooms.end(); m++)
-		for (std::vector<shared_ptr<Room> >::iterator i = (*m)->rooms.begin(); i != (*m)->rooms.end(); i++)
-			(*i)->tick();
-	for (std::vector<MetaRoom *>::iterator m = metarooms.begin(); m != metarooms.end(); m++)
-		for (std::vector<shared_ptr<Room> >::iterator i = (*m)->rooms.begin(); i != (*m)->rooms.end(); i++)
-			(*i)->postTick();
-	for (std::vector<MetaRoom *>::iterator m = metarooms.begin(); m != metarooms.end(); m++)
-		for (std::vector<shared_ptr<Room> >::iterator i = (*m)->rooms.begin(); i != (*m)->rooms.end(); i++)
-			(*i)->resetTick();
+#define MAP_TICK_PASS(op) \
+	do { \
+		for (BOOST_AUTO(m, metarooms.begin()); m != metarooms.end(); m++) \
+			for (BOOST_AUTO(i, (*m)->rooms.begin()); i != (*m)->rooms.begin(); i++) \
+				(*i)->op(); \
+	} while(0)
+
+	MAP_TICK_PASS(tick);
+	MAP_TICK_PASS(postTick);
+	MAP_TICK_PASS(resetTick);
+#undef MAP_TICK_PASS
 }
 
 MetaRoom *Map::metaRoomAt(unsigned int _x, unsigned int _y) {

@@ -27,6 +27,7 @@
 #include <assert.h>
 #include <iostream>
 #include <boost/format.hpp>
+#include <boost/typeof/typeof.hpp> // BOOST_AUTO
 using std::cerr;
 
 #define CAOS_LVALUE_TARG_ROOM(name, check, get, set) \
@@ -708,7 +709,7 @@ void caosVM::v_ERID() {
 		// TODO
 	} else {
 		MetaRoom *r = world.map.getMetaRoom(metaroom_id);
-		for (std::vector<shared_ptr<Room> >::iterator i = r->rooms.begin(); i != r->rooms.end(); i++) {
+		for (BOOST_AUTO(i, r->rooms.begin()); i != r->rooms.end(); i++) {
 			if (out.size() > 0) out = out + " ";
 			out = out + boost::str(boost::format("%d") % (*i)->id);
 		}
